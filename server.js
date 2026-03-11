@@ -270,6 +270,30 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+const initUser = async () => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE email = $1',
+      ['sarzheev.iv@gmail.com']
+    );
+    
+    if (result.rows.length === 0) {
+      const bcrypt = require('bcryptjs');
+      const hashedPassword = await bcrypt.hash('rambaram16', 10);
+      
+      await pool.query(
+        'INSERT INTO users (email, password) VALUES ($1, $2)',
+        ['sarzheev.iv@gmail.com', hashedPassword]
+      );
+      console.log('✅ Пользователь создан!');
+    }
+  } catch (err) {
+    console.error('Ошибка инициализации:', err);
+  }
+};
+
+initUser();
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
