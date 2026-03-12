@@ -122,7 +122,7 @@ app.get('/api/contracts/:id', authenticateToken, async (req, res) => {
 app.put('/api/contracts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, status, progress, total_price, work_price, equipment_price } = req.body;
+    const { name, status, progress, total_price, work_price, equipment_price, contract_date, end_date, expiry_date } = req.body;
 
     if (!name || name.trim() === '') {
       return res.status(400).json({ error: 'Название контракта обязательно' });
@@ -155,8 +155,8 @@ app.put('/api/contracts/:id', authenticateToken, async (req, res) => {
     );
 
     const result = await pool.query(
-      'UPDATE contracts SET name=$1, status=$2, progress=$3, total_price=$4, work_price=$5, equipment_price=$6, updated_at=NOW() WHERE id=$7 RETURNING *',
-      [name, status, progress, total_price, work_price, equipment_price, id]
+      'UPDATE contracts SET name=$1, status=$2, progress=$3, total_price=$4, work_price=$5, equipment_price=$6, contract_date=$7, end_date=$8, expiry_date=$9, updated_at=NOW() WHERE id=$10 RETURNING *',
+      [name, status, progress, total_price, work_price, equipment_price, contract_date||null, end_date||null, expiry_date||null, id]
     );
 
     res.json({ message: 'Контракт обновлён', contract: result.rows[0] });
@@ -450,6 +450,60 @@ app.put('/api/payments/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Платёж обновлён', payment: result.rows[0] });
   } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
 });
+// ============= OBJECTS ROUTES =============
+
+// Получить объекты контракта
+app.get('/api/contracts/:contract_id/objects', authenticateToken, async (req, res) => {
+  try {
+    const { contract_id } = req.params;
+    const result = await pool.query('SELECT * FROM objects WHERE contract_id=$1 ORDER BY id', [contract_id]);
+    res.json(result.rows);
+  } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+// Добавить объект
+app.post('/api/contracts/:contract_id/objects', authenticateToken, async (req, res) => {
+  try {
+    const { contract_id } = req.params;
+    const { name, status } = req.body;
+    if (!name || name.trim() === '') return res.status(400).json({ error: 'Название объекта обязательно' });
+    const contractExists = await pool.query('SELECT id FROM contracts WHERE id=$1', [contract_id]);
+    if (contractExists.rows.length === 0) return res.status(404).json({ error: 'Контракт не найден' });
+    const result = await pool.query(
+      'INSERT INTO objects (contract_id, name, status) VALUES ($1, $2, $3) RETURNING *',
+      [contract_id, name.trim(), status || 'Проектирование']
+    );
+    res.status(201).json({ message: 'Объект добавлен', object: result.rows[0] });
+  } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+// Редактировать объект
+app.put('/api/objects/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, status } = req.body;
+    if (!name || name.trim() === '') return res.status(400).json({ error: 'Название обязательно' });
+    const exists = await pool.query('SELECT id FROM objects WHERE id=$1', [id]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: 'Объект не найден' });
+    const result = await pool.query(
+      'UPDATE objects SET name=$1, status=$2 WHERE id=$3 RETURNING *',
+      [name.trim(), status || 'Проектирование', id]
+    );
+    res.json({ message: 'Объект обновлён', object: result.rows[0] });
+  } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+// Удалить объект
+app.delete('/api/objects/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const exists = await pool.query('SELECT id FROM objects WHERE id=$1', [id]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: 'Объект не найден' });
+    await pool.query('DELETE FROM objects WHERE id=$1', [id]);
+    res.json({ message: 'Объект удалён', id });
+  } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
 // ============= AUDIT LOG =============
 
 app.get('/api/audit-log', authenticateToken, async (req, res) => {
@@ -492,12 +546,17 @@ const initDB = async () => {
         work_price NUMERIC(15,2),
         equipment_price NUMERIC(15,2),
         contract_date DATE,
+        end_date DATE,
+        expiry_date DATE,
         customer VARCHAR(255),
         contractor VARCHAR(255),
         area VARCHAR(50),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      ALTER TABLE contracts ADD COLUMN IF NOT EXISTS end_date DATE;
+      ALTER TABLE contracts ADD COLUMN IF NOT EXISTS expiry_date DATE;
 
       CREATE TABLE IF NOT EXISTS objects (
         id SERIAL PRIMARY KEY,
