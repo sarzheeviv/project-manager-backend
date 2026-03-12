@@ -434,6 +434,22 @@ app.delete('/api/payments/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Платёж удалён', id });
   } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
 });
+
+// Редактировать платёж
+app.put('/api/payments/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, payment_date, purpose } = req.body;
+    if (!amount || isNaN(amount) || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Сумма должна быть положительным числом' });
+    if (!payment_date || isNaN(Date.parse(payment_date))) return res.status(400).json({ error: 'Дата обязательна' });
+    if (!purpose || purpose.trim() === '') return res.status(400).json({ error: 'Назначение обязательно' });
+    const exists = await pool.query('SELECT id FROM payments WHERE id = $1', [id]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: 'Платёж не найден' });
+    await pool.query('INSERT INTO audit_log (user_id, action, table_name, record_id, details) VALUES ($1, $2, $3, $4, $5)', [req.user.id, 'UPDATE', 'payments', id, JSON.stringify({ amount, payment_date, purpose })]);
+    const result = await pool.query('UPDATE payments SET amount=$1, payment_date=$2, purpose=$3 WHERE id=$4 RETURNING *', [amount, payment_date, purpose, id]);
+    res.json({ message: 'Платёж обновлён', payment: result.rows[0] });
+  } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
 // ============= AUDIT LOG =============
 
 app.get('/api/audit-log', authenticateToken, async (req, res) => {
