@@ -391,6 +391,49 @@ app.delete('/api/letters/:id', authenticateToken, async (req, res) => {
   }
 });
 
+
+// ============= PAYMENTS ROUTES =============
+
+// Получить все платежи
+app.get('/api/payments', authenticateToken, async (req, res) => {
+  try {
+    const { contract_id } = req.query;
+    let query = 'SELECT * FROM payments';
+    let params = [];
+    if (contract_id) { query += ' WHERE contract_id = $1'; params = [contract_id]; }
+    query += ' ORDER BY payment_date DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+// Добавить платёж
+app.post('/api/payments', authenticateToken, async (req, res) => {
+  try {
+    const { contract_id, amount, payment_date, purpose } = req.body;
+    if (!contract_id || isNaN(contract_id)) return res.status(400).json({ error: 'contract_id обязателен' });
+    if (!amount || isNaN(amount) || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Сумма должна быть положительным числом' });
+    if (!payment_date || isNaN(Date.parse(payment_date))) return res.status(400).json({ error: 'Дата обязательна' });
+    if (!purpose || purpose.trim() === '') return res.status(400).json({ error: 'Назначение платежа обязательно' });
+    const contractExists = await pool.query('SELECT id FROM contracts WHERE id = $1', [contract_id]);
+    if (contractExists.rows.length === 0) return res.status(404).json({ error: 'Контракт не найден' });
+    await pool.query('INSERT INTO audit_log (user_id, action, table_name, details) VALUES ($1, $2, $3, $4)', [req.user.id, 'INSERT', 'payments', JSON.stringify({ contract_id, amount, payment_date, purpose })]);
+    const result = await pool.query('INSERT INTO payments (contract_id, amount, payment_date, purpose) VALUES ($1, $2, $3, $4) RETURNING *', [contract_id, amount, payment_date, purpose]);
+    res.status(201).json({ message: 'Платёж добавлен', payment: result.rows[0] });
+  } catch (error) { console.error('Ошибка добавления платежа:', error); res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+// Удалить платёж
+app.delete('/api/payments/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const exists = await pool.query('SELECT id FROM payments WHERE id = $1', [id]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: 'Платёж не найден' });
+    await pool.query('INSERT INTO audit_log (user_id, action, table_name, record_id, details) VALUES ($1, $2, $3, $4, $5)', [req.user.id, 'DELETE', 'payments', id, JSON.stringify({ id })]);
+    await pool.query('DELETE FROM payments WHERE id = $1', [id]);
+    res.json({ message: 'Платёж удалён', id });
+  } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
 // ============= AUDIT LOG =============
 
 app.get('/api/audit-log', authenticateToken, async (req, res) => {
@@ -483,6 +526,18 @@ const initDB = async () => {
       CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
       CREATE INDEX IF NOT EXISTS idx_letters_contract ON letters(contract_id);
       CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+
+      CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
+        amount NUMERIC(15,2) NOT NULL,
+        payment_date DATE NOT NULL,
+        purpose VARCHAR(500) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_payments_contract ON payments(contract_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date);
     `);
     console.log('✅ Таблицы созданы');
 

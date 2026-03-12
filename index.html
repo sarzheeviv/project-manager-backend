@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Управление контрактами</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet" />
+  <style>
+    input[type=range] { width: 100%; accent-color: #2563eb; }
+    .rotate-180 { transform: rotate(180deg); }
+    * { transition-property: color, background-color, border-color, box-shadow; transition-duration: 0.15s; }
+  </style>
+</head>
+<body class="bg-gray-50">
+<div id="root"></div>
+<script type="text/babel">
+
+const API_URL = 'https://project-manager-backend-production-abaf.up.railway.app/api';
+
+const CONTRACT_STATUSES = ['Проектирование', 'Согласование', 'На согласовании', 'Завершено', 'На паузе'];
+const TASK_STATUSES = ['новая', 'в работе', 'завершена', 'отложена'];
+const LETTER_STATUSES = ['входящее', 'исходящее', 'архив'];
+
+const fmt = (n) => parseFloat(n || 0).toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtM = (n) => (parseFloat(n || 0) / 1_000_000).toFixed(2);
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
+
+// Локальные объекты контрактов (из оригинального App.jsx)
+const CONTRACT_OBJECTS = {
+  1: [
+    { name: 'ЭТП-73 (Электротяговая подстанция 73)', status: 'Проектирование' },
+    { name: 'ЭТП-104 (Электротяговая подстанция 104)', status: 'Проектирование' },
+    { name: 'КЛ-600В от ЭТП-73 до контактной и рельсовой сети', status: 'Изыскания' },
+    { name: 'КЛ-600В от ЭТП-104 до контактной и рельсовой сети', status: 'Изыскания' },
+    { name: 'КЛ-6кВ от ПС 111 до ЭТП-104', status: 'Проектирование' }
+  ],
+  2: [
+    { name: 'ЭТП-50 (Электротяговая подстанция 50)', status: 'Проектирование' },
+    { name: 'ЭТП-161 (Электротяговая подстанция 161)', status: 'Проектирование' },
+    { name: 'КЛ-600В от ЭТП-50 до контактной и рельсовой сети', status: 'Изыскания' },
+    { name: 'КЛ-600В от ЭТП-161 до контактной и рельсовой сети', status: 'Изыскания' },
+    { name: 'КЛ-10кВ от РП-11027 до ЭТП-50 и КЛ-10кВ от РП-11199 до ЭТП-50', status: 'Проектирование' },
+    { name: 'КЛ-10кВ от РП-16047 до ЭТП-161', status: 'Проектирование' }
+  ],
+  3: [
+    { name: 'ЭТП-162 (Электротяговая подстанция 162)', status: 'Проектирование' },
+    { name: 'КЛ-10кВ от РП-16164 до ЭТП-162', status: 'Проектирование' }
+  ],
+  4: [
+    { name: 'ЭТП-49 (Электротяговая подстанция 49)', status: 'Проектирование' },
+    { name: 'ЭТП-84 (Электротяговая подстанция 84)', status: 'Проектирование' },
+    { name: 'КЛ-600В от ЭТП-49 до контактной и рельсовой сети', status: 'Изыскания' },
+    { name: 'КЛ-600В от ЭТП-84 до контактной и рельсовой сети', status: 'Изыскания' },
+    { name: 'КЛ-10кВ от ПС 46 Бутырки до ЭТП-49', status: 'Проектирование' },
+    { name: 'КЛ-10кВ от РП-12177 до ЭТП-84', status: 'Проектирование' }
+  ]
+};
+
+// ========== ICONS ==========
+const IC = {
+  LogOut: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+  Plus: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  Search: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  Filter: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
+  ChevronDown: ({open}) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{transform: open?'rotate(180deg)':'none', transition:'transform 0.2s'}}><polyline points="6 9 12 15 18 9"/></svg>,
+  Mail: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>,
+  FileText: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>,
+  Trash2: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>,
+  AlertCircle: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+  Clock: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+  CheckCircle2: ({color}) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color||"#3b82f6"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
+  Edit2: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+  Save: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
+  X: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+};
+
+// ========== LOGIN ==========
+function LoginScreen({ onLogin, loading }) {
+  const [email, setEmail] = React.useState('sarzheev.iv@gmail.com');
+  const [password, setPassword] = React.useState('');
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{background:'linear-gradient(135deg,#1d4ed8,#1e40af)'}}>
+      <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+        <h1 className="text-3xl font-bold text-gray-900 mb-1 text-center">Управление контрактами</h1>
+        <p className="text-gray-500 text-center mb-8">ГУП Московский метрополитен</p>
+        <div className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Пароль</label>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)}
+              onKeyDown={e=>e.key==='Enter'&&onLogin(email,password)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Введите пароль"/>
+          </div>
+          <button onClick={()=>onLogin(email,password)} disabled={loading}
+            className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50">
+            {loading ? 'Загрузка...' : 'Войти'}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 text-center mt-6">Система управления контрактами и финансами</p>
+      </div>
+    </div>
+  );
+}
+
+// ========== MODAL ==========
+function AddModal({ type, contracts, onClose }) {
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{background:'rgba(0,0,0,0.5)'}}>
+      <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          {type==='document'&&'Добавить документ'}
+          {type==='task'&&'Создать задачу'}
+          {type==='letter'&&'Добавить письмо'}
+        </h3>
+        <div className="space-y-4">
+          <input type="text" placeholder="Название" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+          <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option>Выберите контракт</option>
+            {contracts.map(c=><option key={c.id} value={c.id}>{c.name.substring(0,60)}</option>)}
+          </select>
+          <textarea placeholder="Описание / Содержание" rows="4" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+          <div className="flex gap-3 pt-2">
+            <button onClick={onClose} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Отмена</button>
+            <button onClick={onClose} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ========== MAIN APP ==========
+function App() {
+  const [token, setToken] = React.useState(localStorage.getItem('token'));
+  const [user, setUser] = React.useState(null);
+  const [activeTab, setActiveTab] = React.useState('overview');
+  const [selectedContract, setSelectedContract] = React.useState('all');
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [showAddModal, setShowAddModal] = React.useState(false);
+  const [modalType, setModalType] = React.useState('');
+  const [expandedContract, setExpandedContract] = React.useState(null);
+  const [contracts, setContracts] = React.useState([]);
+  const [tasks, setTasks] = React.useState([]);
+  const [letters, setLetters] = React.useState([]);
+  const [payments, setPayments] = React.useState([]);
+  const [showPaymentForm, setShowPaymentForm] = React.useState(null); // contract_id
+  const [newPayment, setNewPayment] = React.useState({amount:'', payment_date:'', purpose:''});
+  const [loading, setLoading] = React.useState(false);
+  const [editingId, setEditingId] = React.useState(null);
+  const [editData, setEditData] = React.useState({});
+
+  const handleLogin = async (email, password) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/auth/login`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({email, password})
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem('token', data.token);
+        setToken(data.token); setUser(data.user);
+        loadData(data.token);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка подключения к серверу'); }
+    finally { setLoading(false); }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setToken(null); setUser(null);
+    setContracts([]); setTasks([]); setLetters([]);
+  };
+
+  const loadData = async (t=token) => {
+    if (!t) return;
+    try {
+      setLoading(true);
+      const h = {'Authorization':`Bearer ${t}`};
+      const [cr,tr,lr,pr] = await Promise.all([
+        fetch(`${API_URL}/contracts`,{headers:h}),
+        fetch(`${API_URL}/tasks`,{headers:h}),
+        fetch(`${API_URL}/letters`,{headers:h}),
+        fetch(`${API_URL}/payments`,{headers:h})
+      ]);
+      if (cr.ok) setContracts(await cr.json());
+      if (tr.ok) setTasks(await tr.json());
+      if (lr.ok) setLetters(await lr.json());
+      if (pr && pr.ok) setPayments(await pr.json());
+    } catch(e) { console.error(e); }
+    finally { setLoading(false); }
+  };
+
+  const handleUpdateContract = async (id, data) => {
+    try {
+      const res = await fetch(`${API_URL}/contracts/${id}`, {
+        method:'PUT',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify(data)
+      });
+      const result = await res.json();
+      if (res.ok) { await loadData(); setEditingId(null); }
+      else alert('Ошибка: ' + result.error);
+    } catch(e) { alert('Ошибка подключения'); }
+  };
+
+  const handleAddPayment = async (contract_id) => {
+    try {
+      const res = await fetch(`${API_URL}/payments`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify({...newPayment, contract_id})
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPayments(prev => [data.payment, ...prev]);
+        setShowPaymentForm(null);
+        setNewPayment({amount:'', payment_date:'', purpose:''});
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка подключения'); }
+  };
+
+  const handleDeletePayment = async (id) => {
+    if (!confirm('Удалить платёж?')) return;
+    try {
+      const res = await fetch(`${API_URL}/payments/${id}`, {
+        method:'DELETE',
+        headers:{'Authorization':`Bearer ${token}`}
+      });
+      if (res.ok) setPayments(prev => prev.filter(p => p.id !== id));
+    } catch(e) { alert('Ошибка'); }
+  };
+
+  React.useEffect(() => { if (token) loadData(); }, []);
+
+  if (!token) return <LoginScreen onLogin={handleLogin} loading={loading}/>;
+
+  const urgentCount = tasks.filter(t=>t.status==='в работе').length;
+  const filteredContracts = contracts.filter(c=>c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredTasks = selectedContract==='all' ? tasks : tasks.filter(t=>t.contract_id===parseInt(selectedContract));
+  const filteredLetters = selectedContract==='all' ? letters : letters.filter(l=>l.contract_id===parseInt(selectedContract));
+
+  const getStatusColor = (status) => ({
+    'Проектирование':'bg-blue-50 border-blue-200 text-blue-700',
+    'Согласование':'bg-amber-50 border-amber-200 text-amber-700',
+    'На согласовании':'bg-amber-50 border-amber-200 text-amber-700',
+    'Завершено':'bg-green-50 border-green-200 text-green-700',
+    'На паузе':'bg-gray-50 border-gray-200 text-gray-700',
+  }[status] || 'bg-gray-50 border-gray-200 text-gray-700');
+
+  const getLetterStatusIcon = (status) => ({
+    'требует ответа': <IC.AlertCircle/>,
+    'в работе': <IC.Clock/>,
+    'обработано': <IC.CheckCircle2 color="#3b82f6"/>,
+    'входящее': <IC.CheckCircle2 color="#3b82f6"/>,
+    'исходящее': <IC.CheckCircle2 color="#22c55e"/>,
+    'архив': <IC.CheckCircle2 color="#94a3b8"/>,
+    'закрыто': <IC.CheckCircle2 color="#22c55e"/>,
+  }[status] || <IC.Mail/>);
+
+  const totalPrice = contracts.reduce((s,c)=>s+parseFloat(c.total_price||0),0);
+  const totalWork = contracts.reduce((s,c)=>s+parseFloat(c.work_price||0),0);
+  const totalEquip = contracts.reduce((s,c)=>s+parseFloat(c.equipment_price||0),0);
+
+  // Номер контракта из названия
+  const contractNum = (name) => name.match(/\d{16}/)?.[0]?.slice(-3) || '???';
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+
+      {/* HEADER */}
+      <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Управление контрактами</h1>
+            <p className="text-sm text-gray-500 mt-1">4 государственных контракта • Этап: проектно-изыскательные работы</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={()=>{setShowAddModal(true);setModalType('document');}}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+              <IC.Plus/> Добавить документ
+            </button>
+            <button onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 text-sm font-medium">
+              <IC.LogOut/> Выход
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* NAV */}
+      <nav className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 flex gap-8 overflow-x-auto">
+          {[
+            {id:'overview', label:'📊 Обзор'},
+            {id:'tasks', label:'✓ Задачи и замечания', badge:urgentCount},
+            {id:'letters', label:'✉️ Письма и документы'},
+            {id:'timeline', label:'📅 Графики и сроки'},
+            {id:'finances', label:'💰 Финансы'},
+          ].map(tab=>(
+            <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
+              className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${activeTab===tab.id?'border-blue-600 text-blue-600':'border-transparent text-gray-500 hover:text-gray-900'}`}>
+              {tab.label}
+              {tab.badge>0&&<span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-0.5">{tab.badge}</span>}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {loading && <div className="text-center py-16 text-gray-400 text-lg">Загрузка...</div>}
+
+        {/* ========== OVERVIEW ========== */}
+        {activeTab==='overview' && !loading && (
+          <div className="space-y-8">
+            <div className="flex gap-4 items-center">
+              <div className="flex-1 relative">
+                <span className="absolute left-3 top-2.5 text-gray-400"><IC.Search/></span>
+                <input type="text" placeholder="Найти контракт..." value={searchQuery}
+                  onChange={e=>setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+              </div>
+              <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2 text-sm">
+                <IC.Filter/> Фильтр
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {filteredContracts.map(contract => (
+                <div key={contract.id} className="border border-gray-200 rounded-xl overflow-hidden hover:shadow-md bg-white">
+                  <div className="p-6">
+                    {editingId===contract.id ? (
+                      /* EDIT MODE */
+                      <div className="space-y-4">
+                        <h3 className="font-semibold text-gray-900">Редактирование контракта</h3>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Статус</label>
+                          <select value={editData.status||''} onChange={e=>setEditData({...editData,status:e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            {CONTRACT_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Прогресс: {editData.progress}%</label>
+                          <input type="range" min="0" max="100" value={editData.progress||0}
+                            onChange={e=>setEditData({...editData,progress:parseInt(e.target.value)})}/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Общая сумма (руб.)</label>
+                          <input type="number" value={editData.total_price||''} onChange={e=>setEditData({...editData,total_price:e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Стоимость работ (руб.)</label>
+                          <input type="number" value={editData.work_price||''} onChange={e=>setEditData({...editData,work_price:e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Стоимость оборудования (руб.)</label>
+                          <input type="number" value={editData.equipment_price||''} onChange={e=>setEditData({...editData,equipment_price:e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <button onClick={()=>handleUpdateContract(contract.id,editData)}
+                            className="flex-1 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium flex items-center justify-center gap-1">
+                            <IC.Save/> Сохранить
+                          </button>
+                          <button onClick={()=>setEditingId(null)}
+                            className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium flex items-center justify-center gap-1">
+                            <IC.X/> Отмена
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* VIEW MODE */
+                      <>
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex-1 pr-2">
+                            <h3 className="font-semibold text-gray-900 text-base mb-2 leading-snug">{contract.name}</h3>
+                            <span className={`inline-block px-3 py-1 text-xs rounded-full border font-medium ${getStatusColor(contract.status)}`}>
+                              {contract.status}
+                            </span>
+                          </div>
+                          <button onClick={()=>setExpandedContract(expandedContract===contract.id?null:contract.id)}
+                            className="text-gray-400 hover:text-gray-600 flex-shrink-0 mt-1">
+                            <IC.ChevronDown open={expandedContract===contract.id}/>
+                          </button>
+                        </div>
+
+                        <div className="mb-4">
+                          <div className="flex justify-between mb-2">
+                            <span className="text-sm font-medium text-gray-600">Прогресс</span>
+                            <span className="text-sm font-bold text-gray-900">{contract.progress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div className="h-2 rounded-full" style={{width:`${contract.progress}%`,background:'linear-gradient(to right,#3b82f6,#2563eb)'}}/>
+                          </div>
+                        </div>
+
+                        {expandedContract===contract.id && (
+                          <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
+                            <p className="text-sm font-medium text-gray-600 mb-3">Объекты в контракте:</p>
+                            {(CONTRACT_OBJECTS[contract.id]||[]).map((obj,i)=>(
+                              <div key={i} className="flex items-center justify-between bg-gray-50 p-3 rounded text-sm">
+                                <span className="font-medium text-gray-700">{obj.name}</span>
+                                <span className="text-gray-500 ml-2 flex-shrink-0">{obj.status}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="mt-5 flex gap-2">
+                          <button onClick={()=>{setEditingId(contract.id);setEditData({...contract});}}
+                            className="flex-1 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-sm font-medium flex items-center justify-center gap-1">
+                            <IC.Edit2/> Редактировать
+                          </button>
+                          <button className="flex-1 px-4 py-2 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 text-sm font-medium">
+                            Задачи
+                          </button>
+                        </div>
+
+                        <div className="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500 space-y-1">
+                          <p><span className="font-medium">Заказчик:</span> {contract.customer}</p>
+                          <p><span className="font-medium">Подрядчик:</span> {contract.contractor}</p>
+                          <p><span className="font-medium">Дата контракта:</span> {fmtDate(contract.contract_date)}</p>
+                          <p className="text-blue-600 font-semibold mt-2">
+                            💰 Сумма контракта: {fmtM(contract.total_price)} млн. руб.
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ========== TASKS ========== */}
+        {activeTab==='tasks' && !loading && (
+          <div className="space-y-6">
+            <div className="flex gap-4">
+              <select value={selectedContract} onChange={e=>setSelectedContract(e.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                <option value="all">Все контракты</option>
+                {contracts.map(c=><option key={c.id} value={c.id}>{c.name.substring(0,50)}</option>)}
+              </select>
+              <button onClick={()=>{setShowAddModal(true);setModalType('task');}}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm font-medium">
+                <IC.Plus/> Новая задача
+              </button>
+            </div>
+            {filteredTasks.length===0
+              ? <p className="text-gray-400 text-center py-16">Задач пока нет</p>
+              : <div className="space-y-3">
+                {filteredTasks.map(task=>(
+                  <div key={task.id} className="flex items-center gap-4 p-4 border border-gray-200 rounded-xl hover:shadow-sm bg-white">
+                    <div className={`w-2 h-12 rounded-full flex-shrink-0 ${
+                      task.status==='в работе'?'bg-red-500':
+                      task.status==='завершена'?'bg-green-500':
+                      task.status==='отложена'?'bg-amber-500':'bg-blue-500'}`}/>
+                    <div className="flex-1">
+                      <h4 className="font-medium text-gray-900">{task.title}</h4>
+                      <p className="text-sm text-gray-500 mt-1">{contracts.find(c=>c.id===task.contract_id)?.name?.substring(0,60)}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-medium text-gray-700">Срок: {fmtDate(task.due_date)}</p>
+                      <p className="text-xs text-gray-500 mt-1">{task.assigned_to}</p>
+                    </div>
+                    <button className="text-gray-400 hover:text-red-500"><IC.Trash2/></button>
+                  </div>
+                ))}
+              </div>
+            }
+          </div>
+        )}
+
+        {/* ========== LETTERS ========== */}
+        {activeTab==='letters' && !loading && (
+          <div className="space-y-6">
+            <div className="flex gap-4">
+              <select value={selectedContract} onChange={e=>setSelectedContract(e.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                <option value="all">Все контракты</option>
+                {contracts.map(c=><option key={c.id} value={c.id}>{c.name.substring(0,50)}</option>)}
+              </select>
+              <button onClick={()=>{setShowAddModal(true);setModalType('letter');}}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm font-medium">
+                <IC.Plus/> Добавить письмо
+              </button>
+            </div>
+            {filteredLetters.length===0
+              ? <p className="text-gray-400 text-center py-16">Писем пока нет</p>
+              : <div className="space-y-3">
+                {filteredLetters.map(letter=>(
+                  <div key={letter.id} className="flex items-center gap-4 p-4 border border-gray-200 rounded-xl hover:shadow-sm bg-white">
+                    <span className="text-gray-400 flex-shrink-0"><IC.Mail/></span>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-gray-900">{letter.subject}</h4>
+                      <p className="text-sm text-gray-500 mt-1">{letter.sender}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{fmtDate(letter.date)}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {getLetterStatusIcon(letter.status)}
+                      <span className="text-sm font-medium text-gray-600">{letter.status}</span>
+                    </div>
+                    <button className="text-gray-400 hover:text-blue-500"><IC.FileText/></button>
+                  </div>
+                ))}
+              </div>
+            }
+          </div>
+        )}
+
+        {/* ========== FINANCES ========== */}
+        {activeTab==='finances' && !loading && (
+          <div className="space-y-6">
+            <div className="text-white rounded-xl p-6" style={{background:'linear-gradient(135deg,#1d4ed8,#1e40af)'}}>
+              <h3 className="text-2xl font-bold mb-4">Финансовый обзор всех контрактов</h3>
+              {(() => { const totalPaid = payments.reduce((s,p)=>s+parseFloat(p.amount||0),0); const pct = totalPrice>0?((totalPaid/totalPrice)*100).toFixed(1):0; return (
+              <div className="mt-3 mb-4 bg-blue-800 rounded-lg px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-blue-200 text-xs">💳 Получено от Заказчика (все контракты)</p>
+                  <p className="text-2xl font-bold text-white">{fmt(totalPaid)} руб.</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-blue-200 text-xs">от общей суммы</p>
+                  <p className="text-3xl font-bold text-green-400">{pct}%</p>
+                </div>
+              </div>
+              ); })()}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-blue-200 text-sm">Общая стоимость</p>
+                  <p className="text-3xl font-bold">{(totalPrice/1e9).toFixed(2)} млрд. руб.</p>
+                  <p className="text-xs text-blue-300 mt-1">{fmt(totalPrice)} руб.</p>
+                  <p className="text-xs text-blue-300 mt-1">(в т.ч. НДС 20%: {fmt(totalPrice/6)} руб.)</p>
+                </div>
+                <div>
+                  <p className="text-blue-200 text-sm">Стоимость работ</p>
+                  <p className="text-3xl font-bold">{(totalWork/1e9).toFixed(2)} млрд. руб.</p>
+                  <p className="text-xs text-blue-300 mt-1">{fmt(totalWork)} руб.</p>
+                </div>
+                <div>
+                  <p className="text-blue-200 text-sm">Стоимость оборудования</p>
+                  <p className="text-3xl font-bold">{(totalEquip/1e9).toFixed(2)} млрд. руб.</p>
+                  <p className="text-xs text-blue-300 mt-1">{fmt(totalEquip)} руб.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {contracts.map(c=>{
+                const tp = parseFloat(c.total_price||0);
+                const wp = parseFloat(c.work_price||0);
+                const ep = parseFloat(c.equipment_price||0);
+                return (
+                  <div key={c.id} className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h4 className="font-semibold text-gray-900 mb-1">{c.name}</h4>
+                        <p className="text-sm text-gray-500">Контракт от {fmtDate(c.contract_date)}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0 ml-4">
+                        <p className="text-sm text-gray-600">Общая сумма</p>
+                        <p className="text-2xl font-bold text-blue-600">{fmtM(tp)} млн. руб.</p>
+                        <p className="text-xs text-gray-500 mt-1 font-mono">{fmt(tp)} руб.</p>
+                        <p className="text-xs text-gray-500 mt-1 font-mono">Без НДС: {fmt(tp/1.2)} руб.</p>
+                        <p className="text-xs text-gray-500 mt-1">(в т.ч. НДС 20%: {fmt(tp/6)} руб.)</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <p className="text-xs text-gray-600 font-medium">🔨 Работы (строительство + авторский надзор)</p>
+                        <p className="text-lg font-bold text-blue-700 mt-1">{fmtM(wp)} млн. руб.</p>
+                        <p className="text-xs text-gray-500 mt-1">{tp>0?((wp/tp)*100).toFixed(0):0}% от контракта</p>
+                        <p className="text-xs text-gray-600 mt-2 font-mono border-t border-blue-200 pt-2">{fmt(wp)} руб.</p>
+                      </div>
+                      <div className="bg-amber-50 p-3 rounded-lg">
+                        <p className="text-xs text-gray-600 font-medium">⚙️ Оборудование</p>
+                        <p className="text-lg font-bold text-amber-700 mt-1">{fmtM(ep)} млн. руб.</p>
+                        <p className="text-xs text-gray-500 mt-1">{tp>0?((ep/tp)*100).toFixed(0):0}% от контракта</p>
+                        <p className="text-xs text-gray-600 mt-2 font-mono border-t border-amber-200 pt-2">{fmt(ep)} руб.</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-700">
+                      <p className="font-medium mb-1">💳 Условия оплаты:</p>
+                      <ul className="space-y-1">
+                        <li>• 70% за выполненные работы (в течение 7 дней после приемки)</li>
+                        <li>• 30% остаток (после завершения этапа)</li>
+                        <li>• Авансовый платёж в начале каждого этапа</li>
+                      </ul>
+                    </div>
+                  </div>
+                    {/* PAYMENTS BLOCK */}
+                    {(() => {
+                      const contractPayments = payments.filter(p => p.contract_id === c.id);
+                      const totalPaid = contractPayments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
+                      const remaining = tp - totalPaid;
+                      return (
+                        <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-3 bg-green-50 border-b border-gray-200">
+                            <div>
+                              <span className="font-semibold text-gray-900 text-sm">💰 Платежи от Заказчика</span>
+                              <span className="ml-3 text-green-700 font-bold text-sm">Получено: {fmt(totalPaid)} руб.</span>
+                              {remaining > 0
+                                ? <span className="ml-3 text-red-600 text-xs">Остаток: {fmt(remaining)} руб.</span>
+                                : <span className="ml-3 text-green-600 text-xs font-medium">✅ Оплачено полностью</span>
+                              }
+                            </div>
+                            <button onClick={() => { setShowPaymentForm(showPaymentForm===c.id?null:c.id); setNewPayment({amount:'',payment_date:'',purpose:''}); }}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-xs font-medium">
+                              <IC.Plus/> Добавить
+                            </button>
+                          </div>
+                          {showPaymentForm === c.id && (
+                            <div className="p-4 bg-blue-50 border-b border-gray-200">
+                              <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 mb-1">Дата</label>
+                                  <input type="date" value={newPayment.payment_date} onChange={e=>setNewPayment({...newPayment,payment_date:e.target.value})}
+                                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 mb-1">Сумма (руб.)</label>
+                                  <input type="number" placeholder="0.00" value={newPayment.amount} onChange={e=>setNewPayment({...newPayment,amount:e.target.value})}
+                                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 mb-1">Назначение</label>
+                                  <input type="text" placeholder="Аванс, Этап 1..." value={newPayment.purpose} onChange={e=>setNewPayment({...newPayment,purpose:e.target.value})}
+                                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                </div>
+                              </div>
+                              <div className="flex gap-2 mt-3">
+                                <button onClick={()=>handleAddPayment(c.id)}
+                                  className="px-4 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium flex items-center gap-1">
+                                  <IC.Save/> Сохранить
+                                </button>
+                                <button onClick={()=>setShowPaymentForm(null)}
+                                  className="px-4 py-1.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium">
+                                  Отмена
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {contractPayments.length === 0
+                            ? <p className="text-xs text-gray-400 text-center py-4">Платежей пока нет</p>
+                            : <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-gray-50 text-xs text-gray-500">
+                                    <th className="text-left px-4 py-2 font-medium">Дата</th>
+                                    <th className="text-left px-4 py-2 font-medium">Назначение</th>
+                                    <th className="text-right px-4 py-2 font-medium">Сумма</th>
+                                    <th className="px-2 py-2"></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {contractPayments.map(p => (
+                                    <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50">
+                                      <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{fmtDate(p.payment_date)}</td>
+                                      <td className="px-4 py-2 text-gray-800">{p.purpose}</td>
+                                      <td className="px-4 py-2 text-right font-mono font-semibold text-green-700 whitespace-nowrap">{fmt(p.amount)} руб.</td>
+                                      <td className="px-2 py-2 text-right">
+                                        <button onClick={()=>handleDeletePayment(p.id)} className="text-gray-300 hover:text-red-500"><IC.Trash2/></button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr className="bg-green-50 border-t-2 border-green-200">
+                                    <td colSpan="2" className="px-4 py-2 text-sm font-semibold text-gray-700">Итого получено:</td>
+                                    <td className="px-4 py-2 text-right font-mono font-bold text-green-700">{fmt(totalPaid)} руб.</td>
+                                    <td></td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                          }
+                        </div>
+                      );
+                    })()}
+
+                );
+              })}
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl p-6">
+              <h4 className="font-semibold text-gray-900 mb-4">📊 Статистика по контрактам</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {contracts.map(c=>{
+                  const tp = parseFloat(c.total_price||0);
+                  const pct = totalPrice>0?((tp/totalPrice)*100).toFixed(0):0;
+                  return (
+                    <div key={c.id} className="text-center p-4 bg-blue-50 rounded-lg">
+                      <p className="text-sm text-gray-600 mb-2">Контракт {contractNum(c.name)}</p>
+                      <p className="text-xl font-bold text-blue-600">{(tp/1e9).toFixed(2)} млрд.</p>
+                      <p className="text-xs text-gray-500 mt-1">{pct}% от бюджета</p>
+                      <p className="text-xs text-gray-600 mt-2 font-mono border-t border-blue-200 pt-2">{fmt(tp)} руб.</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========== TIMELINE ========== */}
+        {activeTab==='timeline' && !loading && (
+          <div className="bg-white border border-gray-200 rounded-xl p-8">
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Основные сроки по контрактам (Этап: Проектно-изыскательские работы)</h3>
+            <p className="text-sm text-gray-500 mb-6">📅 Дата заключения всех контрактов: <span className="font-semibold">03.07.2024</span></p>
+            <div className="space-y-6">
+              {contracts.map(c=>(
+                <div key={c.id} className="border-l-4 border-blue-500 pl-6 pb-6">
+                  <h4 className="font-semibold text-gray-900 mb-3">{c.name}</h4>
+                  <div className="space-y-3 text-sm">
+                    {[
+                      {bg:'bg-blue-50',label:'📌 Назначение ответственного лица:',deadline:'в течение 2 дн. после подписания',color:'text-blue-700',note:'К: 05.07.2024 — Заказчик приказом назначает ответственное лицо за подготовку объекта'},
+                      {bg:'bg-indigo-50',label:'🏗️ Разработка Проекта организации строительства:',deadline:'в течение 20 дн.',color:'text-indigo-700',note:'К: 23.07.2024 — Подрядчик разрабатывает и направляет проект организации строительства'},
+                      {bg:'bg-blue-50',label:'📋 Согласование проекта производства работ:',deadline:'в течение 20 дн. после согласования',color:'text-blue-700',note:'К: 13.08.2024 — После согласования проекта с Заказчиком'},
+                      {bg:'bg-amber-50',label:'🔍 Начало проектно-изыскательских работ:',deadline:'в течение 10 рб. дней',color:'text-amber-700',note:'К: 15.08.2024 (примерно) — Начало инженерных изысканий'},
+                      {bg:'bg-orange-50',label:'📄 Разработка проектной документации:',deadline:'в течение 2-3 месяцев',color:'text-orange-700',note:'К: октябрь-ноябрь 2024 — Проектная документация должна пройти госэкспертизу'},
+                      {bg:'bg-red-50',label:'✅ Получение положительного заключения (госэкспертиза):',deadline:'в течение 1-2 месяцев',color:'text-red-700',note:'К: ноябрь-декабрь 2024 — Комитет государственного контроля г. Москвы'},
+                      {bg:'bg-green-50',label:'💰 Разработка сметной документации:',deadline:'в течение 1 месяца',color:'text-green-700',note:'К: январь 2025 — Сметная документация на строительно-монтажные работы (ТСН-2001.12)'},
+                    ].map((item,i)=>(
+                      <div key={i} className={`${item.bg} p-3 rounded-lg`}>
+                        <div className="flex justify-between">
+                          <span className="text-gray-700">{item.label}</span>
+                          <span className={`font-semibold ${item.color} ml-2 flex-shrink-0`}>{item.deadline}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">{item.note}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-8 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+              <h4 className="font-semibold text-gray-900 mb-2">ℹ️ Ключевые требования и параллельные работы:</h4>
+              <ul className="text-sm text-gray-700 space-y-1">
+                <li>✓ Оформление пропусков работникам подрядчика (до 10 рб. дней от заявки)</li>
+                <li>✓ Согласование ТУ с энергоснабжающими организациями</li>
+                <li>✓ Согласования с городскими структурами (Комитет по архитектуре и т.д.)</li>
+                <li>✓ Использование материалов российского производства</li>
+                <li>✓ Соответствие требованиям метрополитена (СТО-СМК-19, СП 120.13330.2022)</li>
+                <li>✓ Авторский надзор в соответствии с СП 246.1325800.2023</li>
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MODAL */}
+      {showAddModal && <AddModal type={modalType} contracts={contracts} onClose={()=>setShowAddModal(false)}/>}
+    </div>
+  );
+}
+
+ReactDOM.render(<App/>, document.getElementById('root'));
+</script>
+</body>
+</html>
