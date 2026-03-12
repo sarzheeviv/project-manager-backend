@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS contracts (
 -- Таблица объектов в контрактах
 CREATE TABLE IF NOT EXISTS objects (
   id SERIAL PRIMARY KEY,
-  contract_id INTEGER REFERENCES contracts(id),
+  contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
   name VARCHAR(500),
   status VARCHAR(50),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS objects (
 -- Таблица задач
 CREATE TABLE IF NOT EXISTS tasks (
   id SERIAL PRIMARY KEY,
-  contract_id INTEGER REFERENCES contracts(id),
+  contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
   title VARCHAR(500),
   status VARCHAR(50),
   due_date DATE,
@@ -45,10 +45,11 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 -- Таблица писем
+-- ВАЖНО: "from" — зарезервированное слово в SQL, используем "sender"
 CREATE TABLE IF NOT EXISTS letters (
   id SERIAL PRIMARY KEY,
-  contract_id INTEGER REFERENCES contracts(id),
-  from VARCHAR(500),
+  contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
+  sender VARCHAR(500),
   subject VARCHAR(500),
   status VARCHAR(50),
   date TIMESTAMP,
@@ -73,12 +74,12 @@ CREATE INDEX IF NOT EXISTS idx_letters_contract ON letters(contract_id);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 
--- Вставляем первого пользователя (если таблица пуста)
+-- Первый пользователь (если таблица пуста)
 INSERT INTO users (email, password) VALUES 
   ('sarzheev.iv@gmail.com', '$2a$10$dXJ3SW6G7P50eS3BQySGCOYvjU5b9fpVQ9PVUWr8E5xVfUJWUWzUi')
 ON CONFLICT (email) DO NOTHING;
 
--- Вставляем тестовые контракты
+-- Тестовые контракты
 INSERT INTO contracts (name, status, progress, total_price, work_price, equipment_price, contract_date, customer, contractor, area) VALUES
   ('Контракт №0173200001424000790: Усиление электроснабжения кабельных линий (Линии 73, 104)', 'Проектирование', 35, 1662177109.21, 1134019924.24, 391409541.02, '2024-07-03', 'ГУП Московский метрополитен', 'ООО ТрансЭнергоСнаб', '296,6 м²'),
   ('Контракт №0173200001424000795: Реконструкция системы электроснабжения (Линии 50, 161)', 'Проектирование', 40, 1438540950.60, 918715773.55, 379731763.79, '2024-07-03', 'ГУП Московский метрополитен', 'ООО ТрансЭнергоСнаб', '456,3 м²'),
