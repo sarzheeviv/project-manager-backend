@@ -122,7 +122,7 @@ app.get('/api/contracts/:id', authenticateToken, async (req, res) => {
 app.put('/api/contracts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, status, progress, total_price, work_price, equipment_price, contract_date, end_date, expiry_date } = req.body;
+    const { name, status, progress, total_price, work_price, equipment_price, pir_price, contract_date, end_date, expiry_date } = req.body;
 
     if (!name || name.trim() === '') {
       return res.status(400).json({ error: 'Название контракта обязательно' });
@@ -155,8 +155,8 @@ app.put('/api/contracts/:id', authenticateToken, async (req, res) => {
     );
 
     const result = await pool.query(
-      'UPDATE contracts SET name=$1, status=$2, progress=$3, total_price=$4, work_price=$5, equipment_price=$6, contract_date=$7, end_date=$8, expiry_date=$9, updated_at=NOW() WHERE id=$10 RETURNING *',
-      [name, status, progress, total_price, work_price, equipment_price, contract_date||null, end_date||null, expiry_date||null, id]
+      'UPDATE contracts SET name=$1, status=$2, progress=$3, total_price=$4, work_price=$5, equipment_price=$6, pir_price=$7, contract_date=$8, end_date=$9, expiry_date=$10, updated_at=NOW() WHERE id=$11 RETURNING *',
+      [name, status, progress, total_price, work_price, equipment_price, pir_price||null, contract_date||null, end_date||null, expiry_date||null, id]
     );
 
     res.json({ message: 'Контракт обновлён', contract: result.rows[0] });
@@ -450,6 +450,95 @@ app.put('/api/payments/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Платёж обновлён', payment: result.rows[0] });
   } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
 });
+// ============= STAGES ROUTES =============
+
+app.get('/api/contracts/:contract_id/stages', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM stages WHERE contract_id=$1 ORDER BY start_date, id', [req.params.contract_id]);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+app.post('/api/contracts/:contract_id/stages', authenticateToken, async (req, res) => {
+  try {
+    const { contract_id } = req.params;
+    const { name, start_date, end_date, price, status } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Название этапа обязательно' });
+    const result = await pool.query(
+      'INSERT INTO stages (contract_id, name, start_date, end_date, price, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [contract_id, name.trim(), start_date||null, end_date||null, price||null, status||'в работе']
+    );
+    res.status(201).json({ stage: result.rows[0] });
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+app.put('/api/stages/:id', authenticateToken, async (req, res) => {
+  try {
+    const { name, start_date, end_date, price, status } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
+    const result = await pool.query(
+      'UPDATE stages SET name=$1, start_date=$2, end_date=$3, price=$4, status=$5 WHERE id=$6 RETURNING *',
+      [name.trim(), start_date||null, end_date||null, price||null, status||'в работе', req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Этап не найден' });
+    res.json({ stage: result.rows[0] });
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+app.delete('/api/stages/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM stages WHERE id=$1', [req.params.id]);
+    res.json({ id: req.params.id });
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+// ============= SUBCONTRACTS ROUTES =============
+
+app.get('/api/subcontracts', authenticateToken, async (req, res) => {
+  try {
+    const { contract_id } = req.query;
+    let q = 'SELECT * FROM subcontracts';
+    let params = [];
+    if (contract_id) { q += ' WHERE contract_id=$1'; params = [contract_id]; }
+    q += ' ORDER BY created_at DESC';
+    const result = await pool.query(q, params);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+app.post('/api/subcontracts', authenticateToken, async (req, res) => {
+  try {
+    const { contract_id, number, name, contractor, type, amount, start_date, end_date, status } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
+    if (!contract_id) return res.status(400).json({ error: 'contract_id обязателен' });
+    const result = await pool.query(
+      'INSERT INTO subcontracts (contract_id, number, name, contractor, type, amount, start_date, end_date, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [contract_id, number||null, name.trim(), contractor||null, type||null, amount||null, start_date||null, end_date||null, status||'в работе']
+    );
+    res.status(201).json({ subcontract: result.rows[0] });
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+app.put('/api/subcontracts/:id', authenticateToken, async (req, res) => {
+  try {
+    const { number, name, contractor, type, amount, start_date, end_date, status } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
+    const result = await pool.query(
+      'UPDATE subcontracts SET number=$1, name=$2, contractor=$3, type=$4, amount=$5, start_date=$6, end_date=$7, status=$8 WHERE id=$9 RETURNING *',
+      [number||null, name.trim(), contractor||null, type||null, amount||null, start_date||null, end_date||null, status||'в работе', req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Договор не найден' });
+    res.json({ subcontract: result.rows[0] });
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+app.delete('/api/subcontracts/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM subcontracts WHERE id=$1', [req.params.id]);
+    res.json({ id: req.params.id });
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
 // ============= OBJECTS ROUTES =============
 
 // Получить объекты контракта
@@ -557,6 +646,32 @@ const initDB = async () => {
 
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS end_date DATE;
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS expiry_date DATE;
+      ALTER TABLE contracts ADD COLUMN IF NOT EXISTS pir_price NUMERIC(15,2);
+
+      CREATE TABLE IF NOT EXISTS stages (
+        id SERIAL PRIMARY KEY,
+        contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
+        name VARCHAR(500) NOT NULL,
+        start_date DATE,
+        end_date DATE,
+        price NUMERIC(15,2),
+        status VARCHAR(50) DEFAULT 'в работе',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS subcontracts (
+        id SERIAL PRIMARY KEY,
+        contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
+        number VARCHAR(200),
+        name VARCHAR(500) NOT NULL,
+        contractor VARCHAR(500),
+        type VARCHAR(100),
+        amount NUMERIC(15,2),
+        start_date DATE,
+        end_date DATE,
+        status VARCHAR(100) DEFAULT 'в работе',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
       CREATE TABLE IF NOT EXISTS objects (
         id SERIAL PRIMARY KEY,
