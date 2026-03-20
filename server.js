@@ -105,6 +105,32 @@ app.get('/api/contracts', authenticateToken, async (req, res) => {
   }
 });
 
+
+app.post('/api/contracts', authenticateToken, async (req, res) => {
+  try {
+    const { name, status, progress, customer, contractor, contract_date, area } = req.body;
+    if (!name || name.trim() === '') {
+      return res.status(400).json({ error: 'Название контракта обязательно' });
+    }
+    if (!CONTRACT_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `Некорректный статус` });
+    }
+    const result = await pool.query(
+      `INSERT INTO contracts (name, status, progress, customer, contractor, contract_date, area, total_price, work_price, equipment_price, pir_price)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,0,0,0,0) RETURNING *`,
+      [name.trim(), status || 'Проектирование', progress || 0, customer || null, contractor || null, contract_date || null, area || null]
+    );
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, table_name, record_id, details) VALUES ($1,$2,$3,$4,$5)',
+      [req.user.id, 'INSERT', 'contracts', result.rows[0].id, JSON.stringify({name})]
+    );
+    res.status(201).json({ message: 'Контракт создан', contract: result.rows[0] });
+  } catch (error) {
+    console.error('Ошибка создания контракта:', error);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
 app.get('/api/contracts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
