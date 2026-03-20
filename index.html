@@ -153,6 +153,19 @@ function App() {
   const [payments, setPayments] = React.useState([]);
   const [showPaymentForm, setShowPaymentForm] = React.useState(null); // contract_id
   const [newPayment, setNewPayment] = React.useState({amount:'', payment_date:'', purpose:''});
+  const [editingPayment, setEditingPayment] = React.useState(null); // {id, amount, payment_date, purpose}
+  const [objects, setObjects] = React.useState({}); // {contract_id: [...]}
+  const [stages, setStages] = React.useState({}); // {contract_id: [...]}
+  const [editingStage, setEditingStage] = React.useState(null);
+  const [newStage, setNewStage] = React.useState({name:'', start_date:'', end_date:'', price:'', status:'в работе'});
+  const [showStageForm, setShowStageForm] = React.useState(null);
+  const [subcontracts, setSubcontracts] = React.useState([]);
+  const [editingSubcontract, setEditingSubcontract] = React.useState(null);
+  const [showSubcontractForm, setShowSubcontractForm] = React.useState(false);
+  const [newSubcontract, setNewSubcontract] = React.useState({contract_id:'', number:'', name:'', contractor:'', type:'ПИР', amount:'', start_date:'', end_date:'', status:'в работе'});
+  const [editingObject, setEditingObject] = React.useState(null); // {id, name, status}
+  const [newObject, setNewObject] = React.useState({name:'', status:'Проектирование'});
+  const [showObjectForm, setShowObjectForm] = React.useState(null); // contract_id
   const [loading, setLoading] = React.useState(false);
   const [editingId, setEditingId] = React.useState(null);
   const [editData, setEditData] = React.useState({});
@@ -195,6 +208,8 @@ function App() {
       if (tr.ok) setTasks(await tr.json());
       if (lr.ok) setLetters(await lr.json());
       if (pr && pr.ok) setPayments(await pr.json());
+      const sr = await fetch(`${API_URL}/subcontracts`, {headers:h});
+      if (sr.ok) setSubcontracts(await sr.json());
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -237,6 +252,182 @@ function App() {
       });
       if (res.ok) setPayments(prev => prev.filter(p => p.id !== id));
     } catch(e) { alert('Ошибка'); }
+  };
+
+  const handleSaveEditPayment = async () => {
+    if (!editingPayment) return;
+    try {
+      const res = await fetch(`${API_URL}/payments/${editingPayment.id}`, {
+        method:'PUT',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify({
+          amount: editingPayment.amount,
+          payment_date: editingPayment.payment_date,
+          purpose: editingPayment.purpose
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPayments(prev => prev.map(p => p.id === editingPayment.id ? data.payment : p));
+        setEditingPayment(null);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка подключения'); }
+  };
+
+  // ---- OBJECTS ----
+  const loadObjects = async (contract_id) => {
+    try {
+      const res = await fetch(`${API_URL}/contracts/${contract_id}/objects`, {
+        headers: {'Authorization': `Bearer ${token}`}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setObjects(prev => ({...prev, [contract_id]: data}));
+      }
+    } catch(e) { console.error(e); }
+  };
+
+  const handleAddObject = async (contract_id) => {
+    if (!newObject.name.trim()) return alert('Введите название объекта');
+    try {
+      const res = await fetch(`${API_URL}/contracts/${contract_id}/objects`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify(newObject)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setObjects(prev => ({...prev, [contract_id]: [...(prev[contract_id]||[]), data.object]}));
+        setNewObject({name:'', status:'Проектирование'});
+        setShowObjectForm(null);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка подключения'); }
+  };
+
+  const handleSaveEditObject = async () => {
+    if (!editingObject) return;
+    try {
+      const res = await fetch(`${API_URL}/objects/${editingObject.id}`, {
+        method:'PUT',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify({name: editingObject.name, status: editingObject.status})
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setObjects(prev => {
+          const updated = {};
+          for (const cid in prev) {
+            updated[cid] = prev[cid].map(o => o.id === editingObject.id ? data.object : o);
+          }
+          return updated;
+        });
+        setEditingObject(null);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка подключения'); }
+  };
+
+  const handleDeleteObject = async (id, contract_id) => {
+    if (!confirm('Удалить объект?')) return;
+    try {
+      const res = await fetch(`${API_URL}/objects/${id}`, {
+        method:'DELETE',
+        headers:{'Authorization':`Bearer ${token}`}
+      });
+      if (res.ok) setObjects(prev => ({...prev, [contract_id]: (prev[contract_id]||[]).filter(o=>o.id!==id)}));
+    } catch(e) { alert('Ошибка'); }
+  };
+
+
+  // ---- STAGES ----
+  const loadStages = async (contract_id) => {
+    try {
+      const res = await fetch(`${API_URL}/contracts/${contract_id}/stages`, {headers:{'Authorization':`Bearer ${token}`}});
+      if (res.ok) setStages(prev => ({...prev, [contract_id]: await res.json()}));
+    } catch(e) {}
+  };
+
+  const handleAddStage = async (contract_id) => {
+    if (!newStage.name.trim()) return alert('Введите название этапа');
+    try {
+      const res = await fetch(`${API_URL}/contracts/${contract_id}/stages`, {
+        method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify({...newStage, contract_id})
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setStages(prev => ({...prev, [contract_id]: [...(prev[contract_id]||[]), data.stage]}));
+        setNewStage({name:'', start_date:'', end_date:'', price:'', status:'в работе'});
+        setShowStageForm(null);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка подключения'); }
+  };
+
+  const handleSaveEditStage = async () => {
+    if (!editingStage) return;
+    try {
+      const res = await fetch(`${API_URL}/stages/${editingStage.id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify(editingStage)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setStages(prev => {
+          const upd = {};
+          for (const cid in prev) upd[cid] = prev[cid].map(s => s.id===editingStage.id ? data.stage : s);
+          return upd;
+        });
+        setEditingStage(null);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка'); }
+  };
+
+  const handleDeleteStage = async (id, contract_id) => {
+    if (!confirm('Удалить этап?')) return;
+    try {
+      const res = await fetch(`${API_URL}/stages/${id}`, {method:'DELETE', headers:{'Authorization':`Bearer ${token}`}});
+      if (res.ok) setStages(prev => ({...prev, [contract_id]: (prev[contract_id]||[]).filter(s=>s.id!==id)}));
+    } catch(e) {}
+  };
+
+  // ---- SUBCONTRACTS ----
+  const handleAddSubcontract = async () => {
+    if (!newSubcontract.name.trim()) return alert('Введите название договора');
+    if (!newSubcontract.contract_id) return alert('Выберите контракт');
+    try {
+      const res = await fetch(`${API_URL}/subcontracts`, {
+        method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify(newSubcontract)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSubcontracts(prev => [data.subcontract, ...prev]);
+        setNewSubcontract({contract_id:'', number:'', name:'', contractor:'', type:'ПИР', amount:'', start_date:'', end_date:'', status:'в работе'});
+        setShowSubcontractForm(false);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка подключения'); }
+  };
+
+  const handleSaveEditSubcontract = async () => {
+    if (!editingSubcontract) return;
+    try {
+      const res = await fetch(`${API_URL}/subcontracts/${editingSubcontract.id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify(editingSubcontract)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSubcontracts(prev => prev.map(s => s.id===editingSubcontract.id ? data.subcontract : s));
+        setEditingSubcontract(null);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка'); }
+  };
+
+  const handleDeleteSubcontract = async (id) => {
+    if (!confirm('Удалить договор подряда?')) return;
+    try {
+      const res = await fetch(`${API_URL}/subcontracts/${id}`, {method:'DELETE', headers:{'Authorization':`Bearer ${token}`}});
+      if (res.ok) setSubcontracts(prev => prev.filter(s=>s.id!==id));
+    } catch(e) {}
   };
 
   React.useEffect(() => { if (token) loadData(); }, []);
@@ -305,6 +496,7 @@ function App() {
             {id:'letters', label:'✉️ Письма и документы'},
             {id:'timeline', label:'📅 Графики и сроки'},
             {id:'finances', label:'💰 Финансы'},
+            {id:'subcontracts', label:'📝 Договоры подряда'},
           ].map(tab=>(
             <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
               className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${activeTab===tab.id?'border-blue-600 text-blue-600':'border-transparent text-gray-500 hover:text-gray-900'}`}>
@@ -368,6 +560,24 @@ function App() {
                           <input type="number" value={editData.equipment_price||''} onChange={e=>setEditData({...editData,equipment_price:e.target.value})}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
                         </div>
+                        <div className="border-t border-gray-100 pt-3 space-y-3">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Даты контракта</p>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Дата заключения контракта</label>
+                            <input type="date" value={editData.contract_date ? editData.contract_date.substring(0,10) : ''} onChange={e=>setEditData({...editData,contract_date:e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Дата окончания выполнения работ</label>
+                            <input type="date" value={editData.end_date ? editData.end_date.substring(0,10) : ''} onChange={e=>setEditData({...editData,end_date:e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Дата действия контракта</label>
+                            <input type="date" value={editData.expiry_date ? editData.expiry_date.substring(0,10) : ''} onChange={e=>setEditData({...editData,expiry_date:e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                        </div>
                         <div className="flex gap-2 pt-1">
                           <button onClick={()=>handleUpdateContract(contract.id,editData)}
                             className="flex-1 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium flex items-center justify-center gap-1">
@@ -406,14 +616,140 @@ function App() {
                         </div>
 
                         {expandedContract===contract.id && (
-                          <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
-                            <p className="text-sm font-medium text-gray-600 mb-3">Объекты в контракте:</p>
-                            {(CONTRACT_OBJECTS[contract.id]||[]).map((obj,i)=>(
-                              <div key={i} className="flex items-center justify-between bg-gray-50 p-3 rounded text-sm">
-                                <span className="font-medium text-gray-700">{obj.name}</span>
-                                <span className="text-gray-500 ml-2 flex-shrink-0">{obj.status}</span>
+                          <div className="mt-4 pt-4 border-t border-gray-100">
+                            <div className="flex items-center justify-between mb-3">
+                              <p className="text-sm font-medium text-gray-700">Объекты в контракте</p>
+                              <button onClick={()=>{ if(!objects[contract.id]) loadObjects(contract.id); setShowObjectForm(showObjectForm===contract.id?null:contract.id); setNewObject({name:'',status:'Проектирование'}); }}
+                                className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-xs font-medium">
+                                <IC.Plus/> Добавить
+                              </button>
+                            </div>
+                            {showObjectForm===contract.id && (
+                              <div className="mb-3 p-3 bg-blue-50 rounded-lg space-y-2">
+                                <input type="text" placeholder="Название объекта" value={newObject.name} onChange={e=>setNewObject({...newObject,name:e.target.value})}
+                                  className="w-full px-3 py-1.5 border border-blue-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                <select value={newObject.status} onChange={e=>setNewObject({...newObject,status:e.target.value})}
+                                  className="w-full px-3 py-1.5 border border-blue-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                  {['Проектирование','Изыскания','Согласование','Строительство','Завершено'].map(s=><option key={s} value={s}>{s}</option>)}
+                                </select>
+                                <div className="flex gap-2">
+                                  <button onClick={()=>handleAddObject(contract.id)} className="flex-1 py-1.5 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 flex items-center justify-center gap-1"><IC.Save/> Сохранить</button>
+                                  <button onClick={()=>setShowObjectForm(null)} className="flex-1 py-1.5 bg-gray-200 text-gray-700 rounded text-xs font-medium hover:bg-gray-300">Отмена</button>
+                                </div>
                               </div>
-                            ))}
+                            )}
+                            <div className="space-y-1.5">
+                              {(objects[contract.id] || CONTRACT_OBJECTS[contract.id] || []).map((obj,i)=>(
+                                editingObject && editingObject.id === obj.id ? (
+                                  <div key={obj.id||i} className="bg-blue-50 p-2 rounded-lg space-y-1.5">
+                                    <input type="text" value={editingObject.name} onChange={e=>setEditingObject({...editingObject,name:e.target.value})}
+                                      className="w-full px-2 py-1 border border-blue-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                    <div className="flex gap-2">
+                                      <select value={editingObject.status} onChange={e=>setEditingObject({...editingObject,status:e.target.value})}
+                                        className="flex-1 px-2 py-1 border border-blue-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        {['Проектирование','Изыскания','Согласование','Строительство','Завершено'].map(s=><option key={s} value={s}>{s}</option>)}
+                                      </select>
+                                      <button onClick={handleSaveEditObject} className="px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"><IC.Save/></button>
+                                      <button onClick={()=>setEditingObject(null)} className="px-2 py-1 bg-gray-200 text-gray-600 rounded text-xs hover:bg-gray-300"><IC.X/></button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div key={obj.id||i} className="flex items-center justify-between bg-gray-50 p-2.5 rounded-lg text-sm group">
+                                    <span className="font-medium text-gray-700 flex-1">{obj.name}</span>
+                                    <span className="text-gray-500 text-xs ml-2 flex-shrink-0">{obj.status}</span>
+                                    {obj.id && (
+                                      <div className="ml-2 flex gap-1 opacity-0 group-hover:opacity-100">
+                                        <button onClick={()=>{ loadObjects(contract.id); setEditingObject({id:obj.id,name:obj.name,status:obj.status}); }}
+                                          className="text-gray-400 hover:text-blue-500"><IC.Edit2/></button>
+                                        <button onClick={()=>handleDeleteObject(obj.id, contract.id)}
+                                          className="text-gray-400 hover:text-red-500"><IC.Trash2/></button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {expandedContract===contract.id && (
+                          <div className="mt-3 pt-3 border-t border-gray-100">
+                            <div className="flex items-center justify-between mb-3">
+                              <p className="text-sm font-medium text-gray-700">📋 Этапы контракта</p>
+                              <button onClick={()=>{ if(!stages[contract.id]) loadStages(contract.id); setShowStageForm(showStageForm===contract.id?null:contract.id); setNewStage({name:'',start_date:'',end_date:'',price:'',status:'в работе'}); }}
+                                className="flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 text-xs font-medium">
+                                <IC.Plus/> Добавить
+                              </button>
+                            </div>
+                            {showStageForm===contract.id && (
+                              <div className="mb-3 p-3 bg-indigo-50 rounded-lg space-y-2">
+                                <input type="text" placeholder="Название этапа (напр. Этап 1 — ПИР)" value={newStage.name} onChange={e=>setNewStage({...newStage,name:e.target.value})}
+                                  className="w-full px-3 py-1.5 border border-indigo-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div><label className="text-xs text-gray-500">Начало</label>
+                                    <input type="date" value={newStage.start_date} onChange={e=>setNewStage({...newStage,start_date:e.target.value})}
+                                      className="w-full px-2 py-1.5 border border-indigo-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div>
+                                  <div><label className="text-xs text-gray-500">Окончание</label>
+                                    <input type="date" value={newStage.end_date} onChange={e=>setNewStage({...newStage,end_date:e.target.value})}
+                                      className="w-full px-2 py-1.5 border border-indigo-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div><label className="text-xs text-gray-500">Стоимость (руб.)</label>
+                                    <input type="number" placeholder="0.00" value={newStage.price} onChange={e=>setNewStage({...newStage,price:e.target.value})}
+                                      className="w-full px-2 py-1.5 border border-indigo-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div>
+                                  <div><label className="text-xs text-gray-500">Статус</label>
+                                    <select value={newStage.status} onChange={e=>setNewStage({...newStage,status:e.target.value})}
+                                      className="w-full px-2 py-1.5 border border-indigo-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                      {['в работе','завершён','приостановлен','не начат'].map(s=><option key={s}>{s}</option>)}
+                                    </select></div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button onClick={()=>handleAddStage(contract.id)} className="flex-1 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 flex items-center justify-center gap-1"><IC.Save/> Сохранить</button>
+                                  <button onClick={()=>setShowStageForm(null)} className="flex-1 py-1.5 bg-gray-200 text-gray-700 rounded text-xs font-medium hover:bg-gray-300">Отмена</button>
+                                </div>
+                              </div>
+                            )}
+                            <div className="space-y-1.5">
+                              {(stages[contract.id]||[]).map(stage=>(
+                                editingStage && editingStage.id===stage.id ? (
+                                  <div key={stage.id} className="bg-indigo-50 p-2.5 rounded-lg space-y-2">
+                                    <input type="text" value={editingStage.name} onChange={e=>setEditingStage({...editingStage,name:e.target.value})}
+                                      className="w-full px-2 py-1 border border-indigo-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <input type="date" value={editingStage.start_date ? editingStage.start_date.substring(0,10) : ''} onChange={e=>setEditingStage({...editingStage,start_date:e.target.value})}
+                                        className="px-2 py-1 border border-indigo-300 rounded text-sm focus:outline-none"/>
+                                      <input type="date" value={editingStage.end_date ? editingStage.end_date.substring(0,10) : ''} onChange={e=>setEditingStage({...editingStage,end_date:e.target.value})}
+                                        className="px-2 py-1 border border-indigo-300 rounded text-sm focus:outline-none"/>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <input type="number" placeholder="Стоимость" value={editingStage.price||''} onChange={e=>setEditingStage({...editingStage,price:e.target.value})}
+                                        className="px-2 py-1 border border-indigo-300 rounded text-sm focus:outline-none"/>
+                                      <select value={editingStage.status||'в работе'} onChange={e=>setEditingStage({...editingStage,status:e.target.value})}
+                                        className="px-2 py-1 border border-indigo-300 rounded text-sm focus:outline-none">
+                                        {['в работе','завершён','приостановлен','не начат'].map(s=><option key={s}>{s}</option>)}
+                                      </select>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <button onClick={handleSaveEditStage} className="flex-1 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 flex items-center justify-center gap-1"><IC.Save/> Сохранить</button>
+                                      <button onClick={()=>setEditingStage(null)} className="flex-1 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300">Отмена</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div key={stage.id} className="flex items-center justify-between bg-gray-50 p-2.5 rounded-lg text-xs group">
+                                    <div className="flex-1">
+                                      <p className="font-medium text-gray-800">{stage.name}</p>
+                                      <p className="text-gray-500 mt-0.5">{stage.start_date ? fmtDate(stage.start_date) : '—'} → {stage.end_date ? fmtDate(stage.end_date) : '—'}{stage.price ? ` • ${fmt(stage.price)} руб.` : ''}</p>
+                                    </div>
+                                    <span className={`ml-2 px-2 py-0.5 rounded-full text-xs flex-shrink-0 ${stage.status==='завершён'?'bg-green-100 text-green-700':stage.status==='приостановлен'?'bg-amber-100 text-amber-700':'bg-blue-100 text-blue-700'}`}>{stage.status}</span>
+                                    <div className="ml-2 flex gap-1 opacity-0 group-hover:opacity-100">
+                                      <button onClick={()=>{ loadStages(contract.id); setEditingStage({...stage}); }} className="text-gray-400 hover:text-blue-500"><IC.Edit2/></button>
+                                      <button onClick={()=>handleDeleteStage(stage.id, contract.id)} className="text-gray-400 hover:text-red-500"><IC.Trash2/></button>
+                                    </div>
+                                  </div>
+                                )
+                              ))}
+                              {(stages[contract.id]||[]).length===0 && <p className="text-xs text-gray-400 text-center py-2">Этапы не добавлены</p>}
+                            </div>
                           </div>
                         )}
 
@@ -427,10 +763,14 @@ function App() {
                           </button>
                         </div>
 
-                        <div className="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500 space-y-1">
-                          <p><span className="font-medium">Заказчик:</span> {contract.customer}</p>
-                          <p><span className="font-medium">Подрядчик:</span> {contract.contractor}</p>
-                          <p><span className="font-medium">Дата контракта:</span> {fmtDate(contract.contract_date)}</p>
+                        <div className="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500 space-y-1.5">
+                          <p><span className="font-medium text-gray-700">Заказчик:</span> {contract.customer}</p>
+                          <p><span className="font-medium text-gray-700">Подрядчик:</span> {contract.contractor}</p>
+                          <div className="pt-1 space-y-1">
+                            <p><span className="font-medium text-gray-700">📅 Дата заключения контракта:</span> {fmtDate(contract.contract_date)}</p>
+                            <p><span className="font-medium text-gray-700">🏁 Дата окончания выполнения работ:</span> {contract.end_date ? fmtDate(contract.end_date) : <span className="text-gray-400 italic">не указана</span>}</p>
+                            <p><span className="font-medium text-gray-700">📋 Дата действия контракта:</span> {contract.expiry_date ? fmtDate(contract.expiry_date) : <span className="text-gray-400 italic">не указана</span>}</p>
+                          </div>
                           <p className="text-blue-600 font-semibold mt-2">
                             💰 Сумма контракта: {fmtM(contract.total_price)} млн. руб.
                           </p>
@@ -577,20 +917,48 @@ function App() {
                         <p className="text-xs text-gray-500 mt-1">(в т.ч. НДС 20%: {fmt(tp/6)} руб.)</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
-                      <div className="bg-blue-50 p-3 rounded-lg">
-                        <p className="text-xs text-gray-600 font-medium">🔨 Работы (строительство + авторский надзор)</p>
-                        <p className="text-lg font-bold text-blue-700 mt-1">{fmtM(wp)} млн. руб.</p>
-                        <p className="text-xs text-gray-500 mt-1">{tp>0?((wp/tp)*100).toFixed(0):0}% от контракта</p>
-                        <p className="text-xs text-gray-600 mt-2 font-mono border-t border-blue-200 pt-2">{fmt(wp)} руб.</p>
-                      </div>
-                      <div className="bg-amber-50 p-3 rounded-lg">
-                        <p className="text-xs text-gray-600 font-medium">⚙️ Оборудование</p>
-                        <p className="text-lg font-bold text-amber-700 mt-1">{fmtM(ep)} млн. руб.</p>
-                        <p className="text-xs text-gray-500 mt-1">{tp>0?((ep/tp)*100).toFixed(0):0}% от контракта</p>
-                        <p className="text-xs text-gray-600 mt-2 font-mono border-t border-amber-200 pt-2">{fmt(ep)} руб.</p>
-                      </div>
-                    </div>
+                    {(() => {
+                      const pp = parseFloat(c.pir_price||0);
+                      return (
+                        <div className="grid grid-cols-3 gap-3 pt-4 border-t border-gray-100">
+                          <div className="bg-blue-50 p-3 rounded-lg">
+                            <p className="text-xs text-gray-600 font-medium">🔨 Строительно-монтажные работы</p>
+                            <p className="text-base font-bold text-blue-700 mt-1">{fmtM(wp)} млн. руб.</p>
+                            <p className="text-xs text-gray-500 mt-1">{tp>0?((wp/tp)*100).toFixed(0):0}% от контракта</p>
+                            <p className="text-xs text-gray-600 mt-2 font-mono border-t border-blue-200 pt-2">{fmt(wp)} руб.</p>
+                          </div>
+                          <div className="bg-violet-50 p-3 rounded-lg">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs text-gray-600 font-medium">📐 ПИР</p>
+                              <button onClick={()=>setEditingId('pir_'+c.id)} className="text-gray-400 hover:text-violet-600"><IC.Edit2/></button>
+                            </div>
+                            {editingId==='pir_'+c.id ? (
+                              <div className="mt-1 space-y-1">
+                                <input type="number" defaultValue={c.pir_price||''} id={`pir_${c.id}`} placeholder="0.00"
+                                  className="w-full px-2 py-1 border border-violet-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"/>
+                                <div className="flex gap-1">
+                                  <button onClick={()=>{ const v=document.getElementById('pir_'+c.id).value; handleUpdateContract(c.id,{...c,pir_price:v}); }}
+                                    className="flex-1 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 flex items-center justify-center gap-1"><IC.Save/></button>
+                                  <button onClick={()=>setEditingId(null)} className="flex-1 py-1 bg-gray-200 text-gray-600 rounded text-xs"><IC.X/></button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <p className="text-base font-bold text-violet-700 mt-1">{fmtM(pp)} млн. руб.</p>
+                                <p className="text-xs text-gray-500 mt-1">{tp>0?((pp/tp)*100).toFixed(0):0}% от контракта</p>
+                                <p className="text-xs text-gray-600 mt-2 font-mono border-t border-violet-200 pt-2">{fmt(pp)} руб.</p>
+                              </>
+                            )}
+                          </div>
+                          <div className="bg-amber-50 p-3 rounded-lg">
+                            <p className="text-xs text-gray-600 font-medium">⚙️ Оборудование</p>
+                            <p className="text-base font-bold text-amber-700 mt-1">{fmtM(ep)} млн. руб.</p>
+                            <p className="text-xs text-gray-500 mt-1">{tp>0?((ep/tp)*100).toFixed(0):0}% от контракта</p>
+                            <p className="text-xs text-gray-600 mt-2 font-mono border-t border-amber-200 pt-2">{fmt(ep)} руб.</p>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-700">
                       <p className="font-medium mb-1">💳 Условия оплаты:</p>
                       <ul className="space-y-1">
@@ -599,7 +967,6 @@ function App() {
                         <li>• Авансовый платёж в начале каждого этапа</li>
                       </ul>
                     </div>
-                  </div>
                     {/* PAYMENTS BLOCK */}
                     {(() => {
                       const contractPayments = payments.filter(p => p.contract_id === c.id);
@@ -665,14 +1032,40 @@ function App() {
                                 </thead>
                                 <tbody>
                                   {contractPayments.map(p => (
-                                    <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50">
-                                      <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{fmtDate(p.payment_date)}</td>
-                                      <td className="px-4 py-2 text-gray-800">{p.purpose}</td>
-                                      <td className="px-4 py-2 text-right font-mono font-semibold text-green-700 whitespace-nowrap">{fmt(p.amount)} руб.</td>
-                                      <td className="px-2 py-2 text-right">
-                                        <button onClick={()=>handleDeletePayment(p.id)} className="text-gray-300 hover:text-red-500"><IC.Trash2/></button>
-                                      </td>
-                                    </tr>
+                                    editingPayment && editingPayment.id === p.id ? (
+                                      <tr key={p.id} className="border-t border-gray-100 bg-blue-50">
+                                        <td className="px-2 py-1.5">
+                                          <input type="date" value={editingPayment.payment_date}
+                                            onChange={e=>setEditingPayment({...editingPayment,payment_date:e.target.value})}
+                                            className="w-full px-2 py-1 border border-blue-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                        </td>
+                                        <td className="px-2 py-1.5">
+                                          <input type="text" value={editingPayment.purpose}
+                                            onChange={e=>setEditingPayment({...editingPayment,purpose:e.target.value})}
+                                            className="w-full px-2 py-1 border border-blue-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                        </td>
+                                        <td className="px-2 py-1.5">
+                                          <input type="number" value={editingPayment.amount}
+                                            onChange={e=>setEditingPayment({...editingPayment,amount:e.target.value})}
+                                            className="w-full px-2 py-1 border border-blue-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                                          <button onClick={handleSaveEditPayment} className="text-green-600 hover:text-green-800 mr-2"><IC.Save/></button>
+                                          <button onClick={()=>setEditingPayment(null)} className="text-gray-400 hover:text-gray-600"><IC.X/></button>
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50">
+                                        <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{fmtDate(p.payment_date)}</td>
+                                        <td className="px-4 py-2 text-gray-800">{p.purpose}</td>
+                                        <td className="px-4 py-2 text-right font-mono font-semibold text-green-700 whitespace-nowrap">{fmt(p.amount)} руб.</td>
+                                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                                          <button onClick={()=>setEditingPayment({id:p.id,amount:p.amount,payment_date:p.payment_date.substring(0,10),purpose:p.purpose})}
+                                            className="text-gray-300 hover:text-blue-500 mr-2"><IC.Edit2/></button>
+                                          <button onClick={()=>handleDeletePayment(p.id)} className="text-gray-300 hover:text-red-500"><IC.Trash2/></button>
+                                        </td>
+                                      </tr>
+                                    )
                                   ))}
                                 </tbody>
                                 <tfoot>
@@ -687,6 +1080,7 @@ function App() {
                         </div>
                       );
                     })()}
+                  </div>
 
                 );
               })}
@@ -758,6 +1152,203 @@ function App() {
         )}
       </div>
 
+
+        {/* ========== SUBCONTRACTS ========== */}
+        {activeTab==='subcontracts' && !loading && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Договоры подряда</h2>
+                <p className="text-sm text-gray-500 mt-1">Всего: {subcontracts.length} договоров</p>
+              </div>
+              <button onClick={()=>{ setShowSubcontractForm(true); setNewSubcontract({contract_id:'',number:'',name:'',contractor:'',type:'ПИР',amount:'',start_date:'',end_date:'',status:'в работе'}); }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+                <IC.Plus/> Добавить договор
+              </button>
+            </div>
+
+            {showSubcontractForm && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4">
+                <h3 className="font-semibold text-gray-900">Новый договор подряда</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Контракт</label>
+                    <select value={newSubcontract.contract_id} onChange={e=>setNewSubcontract({...newSubcontract,contract_id:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">Выберите контракт</option>
+                      {contracts.map(c=><option key={c.id} value={c.id}>{c.name.substring(0,55)}...</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Тип</label>
+                    <select value={newSubcontract.type} onChange={e=>setNewSubcontract({...newSubcontract,type:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {['ПИР','СМР','Изыскания','Поставка материалов','Поставка оборудования','Авторский надзор','Прочее'].map(t=><option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Номер договора</label>
+                    <input type="text" placeholder="№ договора" value={newSubcontract.number} onChange={e=>setNewSubcontract({...newSubcontract,number:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Название договора</label>
+                    <input type="text" placeholder="Название" value={newSubcontract.name} onChange={e=>setNewSubcontract({...newSubcontract,name:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Подрядчик</label>
+                    <input type="text" placeholder="Наименование организации" value={newSubcontract.contractor} onChange={e=>setNewSubcontract({...newSubcontract,contractor:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Сумма договора (руб.)</label>
+                    <input type="number" placeholder="0.00" value={newSubcontract.amount} onChange={e=>setNewSubcontract({...newSubcontract,amount:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Дата начала</label>
+                    <input type="date" value={newSubcontract.start_date} onChange={e=>setNewSubcontract({...newSubcontract,start_date:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Дата окончания</label>
+                    <input type="date" value={newSubcontract.end_date} onChange={e=>setNewSubcontract({...newSubcontract,end_date:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Статус</label>
+                    <select value={newSubcontract.status} onChange={e=>setNewSubcontract({...newSubcontract,status:e.target.value})}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {['в работе','завершён','приостановлен','не начат','расторгнут'].map(s=><option key={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-3 pt-1">
+                  <button onClick={handleAddSubcontract} className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium flex items-center gap-1"><IC.Save/> Сохранить</button>
+                  <button onClick={()=>setShowSubcontractForm(false)} className="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium">Отмена</button>
+                </div>
+              </div>
+            )}
+
+            {/* Filter by contract */}
+            <div className="flex gap-3">
+              <select value={selectedContract} onChange={e=>setSelectedContract(e.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="all">Все контракты</option>
+                {contracts.map(c=><option key={c.id} value={c.id}>{c.name.substring(0,50)}...</option>)}
+              </select>
+            </div>
+
+            {/* Subcontracts grouped by type */}
+            {(() => {
+              const filtered = selectedContract==='all' ? subcontracts : subcontracts.filter(s=>String(s.contract_id)===String(selectedContract));
+              const types = ['ПИР','СМР','Изыскания','Поставка материалов','Поставка оборудования','Авторский надзор','Прочее'];
+              const getTypeColor = (t) => ({
+                'ПИР':'bg-violet-50 border-violet-200',
+                'СМР':'bg-blue-50 border-blue-200',
+                'Изыскания':'bg-cyan-50 border-cyan-200',
+                'Поставка материалов':'bg-amber-50 border-amber-200',
+                'Поставка оборудования':'bg-orange-50 border-orange-200',
+                'Авторский надзор':'bg-green-50 border-green-200',
+              }[t] || 'bg-gray-50 border-gray-200');
+              const getStatusColor = (s) => ({
+                'в работе':'bg-blue-100 text-blue-700',
+                'завершён':'bg-green-100 text-green-700',
+                'приостановлен':'bg-amber-100 text-amber-700',
+                'не начат':'bg-gray-100 text-gray-600',
+                'расторгнут':'bg-red-100 text-red-700',
+              }[s] || 'bg-gray-100 text-gray-600');
+              if (filtered.length===0) return <p className="text-gray-400 text-center py-16">Договоров подряда пока нет</p>;
+              return (
+                <div className="space-y-3">
+                  {filtered.map(s=>(
+                    editingSubcontract && editingSubcontract.id===s.id ? (
+                      <div key={s.id} className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4">
+                        <h3 className="font-semibold text-gray-900">Редактирование договора</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Тип</label>
+                            <select value={editingSubcontract.type||'ПИР'} onChange={e=>setEditingSubcontract({...editingSubcontract,type:e.target.value})}
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                              {['ПИР','СМР','Изыскания','Поставка материалов','Поставка оборудования','Авторский надзор','Прочее'].map(t=><option key={t}>{t}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Номер</label>
+                            <input type="text" value={editingSubcontract.number||''} onChange={e=>setEditingSubcontract({...editingSubcontract,number:e.target.value})}
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Название</label>
+                            <input type="text" value={editingSubcontract.name||''} onChange={e=>setEditingSubcontract({...editingSubcontract,name:e.target.value})}
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Подрядчик</label>
+                            <input type="text" value={editingSubcontract.contractor||''} onChange={e=>setEditingSubcontract({...editingSubcontract,contractor:e.target.value})}
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Сумма (руб.)</label>
+                            <input type="number" value={editingSubcontract.amount||''} onChange={e=>setEditingSubcontract({...editingSubcontract,amount:e.target.value})}
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Дата начала</label>
+                            <input type="date" value={editingSubcontract.start_date ? editingSubcontract.start_date.substring(0,10) : ''} onChange={e=>setEditingSubcontract({...editingSubcontract,start_date:e.target.value})}
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Дата окончания</label>
+                            <input type="date" value={editingSubcontract.end_date ? editingSubcontract.end_date.substring(0,10) : ''} onChange={e=>setEditingSubcontract({...editingSubcontract,end_date:e.target.value})}
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Статус</label>
+                            <select value={editingSubcontract.status||'в работе'} onChange={e=>setEditingSubcontract({...editingSubcontract,status:e.target.value})}
+                              className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                              {['в работе','завершён','приостановлен','не начат','расторгнут'].map(s=><option key={s}>{s}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex gap-3">
+                          <button onClick={handleSaveEditSubcontract} className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium flex items-center gap-1"><IC.Save/> Сохранить</button>
+                          <button onClick={()=>setEditingSubcontract(null)} className="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium">Отмена</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={s.id} className={`border rounded-xl p-4 hover:shadow-sm bg-white`}>
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getTypeColor(s.type)}`}>{s.type}</span>
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(s.status)}`}>{s.status}</span>
+                              {s.number && <span className="text-xs text-gray-500">№ {s.number}</span>}
+                            </div>
+                            <h4 className="font-semibold text-gray-900">{s.name}</h4>
+                            {s.contractor && <p className="text-sm text-gray-600 mt-1">Подрядчик: {s.contractor}</p>}
+                            <p className="text-xs text-gray-500 mt-1">
+                              {contracts.find(c=>c.id===s.contract_id)?.name?.substring(0,60)}...
+                            </p>
+                          </div>
+                          <div className="text-right ml-4 flex-shrink-0">
+                            {s.amount && <p className="text-lg font-bold text-blue-600">{fmtM(s.amount)} млн. руб.</p>}
+                            <p className="text-xs text-gray-500 mt-1">{s.start_date ? fmtDate(s.start_date) : '—'} → {s.end_date ? fmtDate(s.end_date) : '—'}</p>
+                            <div className="flex gap-2 mt-2 justify-end">
+                              <button onClick={()=>setEditingSubcontract({...s})} className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs"><IC.Edit2/> Изменить</button>
+                              <button onClick={()=>handleDeleteSubcontract(s.id)} className="flex items-center gap-1 px-2 py-1 bg-red-50 text-red-500 rounded hover:bg-red-100 text-xs"><IC.Trash2/></button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       {/* MODAL */}
       {showAddModal && <AddModal type={modalType} contracts={contracts} onClose={()=>setShowAddModal(false)}/>}
     </div>
