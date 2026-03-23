@@ -162,7 +162,7 @@ function App() {
   const [subcontracts, setSubcontracts] = React.useState([]);
   const [editingSubcontract, setEditingSubcontract] = React.useState(null);
   const [showSubcontractForm, setShowSubcontractForm] = React.useState(false);
-  const [newSubcontract, setNewSubcontract] = React.useState({contract_id:'', number:'', name:'', contractor:'', type:'ПИР', amount:'', start_date:'', end_date:'', status:'в работе'});
+  const [newSubcontract, setNewSubcontract] = React.useState({contract_ids:[], number:'', name:'', contractor:'', type:'ПИР', amount:'', start_date:'', end_date:'', status:'в работе'});
   const [editingObject, setEditingObject] = React.useState(null); // {id, name, status}
   const [newObject, setNewObject] = React.useState({name:'', status:'Проектирование'});
   const [showObjectForm, setShowObjectForm] = React.useState(null); // contract_id
@@ -414,7 +414,7 @@ function App() {
   // ---- SUBCONTRACTS ----
   const handleAddSubcontract = async () => {
     if (!newSubcontract.name.trim()) return alert('Введите название договора');
-    if (!newSubcontract.contract_id) return alert('Выберите контракт');
+    if (!newSubcontract.contract_ids.length) return alert('Выберите хотя бы один контракт');
     try {
       const res = await fetch(`${API_URL}/subcontracts`, {
         method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
@@ -423,7 +423,7 @@ function App() {
       const data = await res.json();
       if (res.ok) {
         setSubcontracts(prev => [data.subcontract, ...prev]);
-        setNewSubcontract({contract_id:'', number:'', name:'', contractor:'', type:'ПИР', amount:'', start_date:'', end_date:'', status:'в работе'});
+        setNewSubcontract({contract_ids:[], number:'', name:'', contractor:'', type:'ПИР', amount:'', start_date:'', end_date:'', status:'в работе'});
         setShowSubcontractForm(false);
       } else { alert('Ошибка: ' + data.error); }
     } catch(e) { alert('Ошибка подключения'); }
@@ -492,6 +492,7 @@ function App() {
 
   // Номер контракта из названия
   const contractNum = (name) => { const m = name.match(/№(\d+)/); return m ? m[1].slice(-4) : '????'; };
+  const toggleContractId = (arr, id) => { const a = arr||[]; return a.includes(id) ? a.filter(x=>x!==id) : [...a, id]; };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1349,13 +1350,18 @@ function App() {
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4">
                 <h3 className="font-semibold text-gray-900">Новый договор подряда</h3>
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Контракт</label>
-                    <select value={newSubcontract.contract_id} onChange={e=>setNewSubcontract({...newSubcontract,contract_id:e.target.value})}
-                      className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">Выберите контракт</option>
-                      {contracts.map(c=><option key={c.id} value={c.id}>{c.name.substring(0,55)}...</option>)}
-                    </select>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-medium text-gray-600 mb-2">Контракты <span className="text-blue-500">(можно выбрать несколько)</span></label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {contracts.map(c=>(
+                        <label key={c.id} className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer text-xs transition ${(newSubcontract.contract_ids||[]).includes(c.id)?'border-blue-500 bg-blue-50':'border-gray-200 hover:bg-gray-50'}`}>
+                          <input type="checkbox" checked={(newSubcontract.contract_ids||[]).includes(c.id)}
+                            onChange={()=>setNewSubcontract({...newSubcontract, contract_ids: toggleContractId(newSubcontract.contract_ids||[], c.id)})}
+                            className="mt-0.5 flex-shrink-0"/>
+                          <span className="text-gray-700 leading-tight">{c.name.substring(0,60)}...</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Тип</label>
@@ -1420,7 +1426,7 @@ function App() {
 
             {/* Subcontracts grouped by type */}
             {(() => {
-              const filtered = selectedContract==='all' ? subcontracts : subcontracts.filter(s=>String(s.contract_id)===String(selectedContract));
+              const filtered = selectedContract==='all' ? subcontracts : subcontracts.filter(s=>(s.contract_ids||[s.contract_id]).map(String).includes(String(selectedContract)));
               const types = ['ПИР','СМР','Изыскания','Поставка материалов','Поставка оборудования','Авторский надзор','Прочее'];
               const getTypeColor = (t) => ({
                 'ПИР':'bg-violet-50 border-violet-200',
@@ -1461,6 +1467,20 @@ function App() {
                             <label className="block text-xs font-medium text-gray-600 mb-1">Название</label>
                             <input type="text" value={editingSubcontract.name||''} onChange={e=>setEditingSubcontract({...editingSubcontract,name:e.target.value})}
                               className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-xs font-medium text-gray-600 mb-2">Контракты <span className="text-blue-500">(можно выбрать несколько)</span></label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {contracts.map(c=>(
+                                <label key={c.id} className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer text-xs transition ${(editingSubcontract.contract_ids||[]).includes(c.id)?'border-blue-500 bg-blue-100':'border-gray-200 hover:bg-gray-50'}`}>
+                                  <input type="checkbox"
+                                    checked={(editingSubcontract.contract_ids||[]).includes(c.id)}
+                                    onChange={()=>setEditingSubcontract({...editingSubcontract, contract_ids: toggleContractId(editingSubcontract.contract_ids||[], c.id)})}
+                                    className="mt-0.5 flex-shrink-0"/>
+                                  <span className="text-gray-700 leading-tight">{c.name.substring(0,60)}...</span>
+                                </label>
+                              ))}
+                            </div>
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-gray-600 mb-1">Подрядчик</label>
@@ -1507,14 +1527,20 @@ function App() {
                             <h4 className="font-semibold text-gray-900">{s.name}</h4>
                             {s.contractor && <p className="text-sm text-gray-600 mt-1">Подрядчик: {s.contractor}</p>}
                             <p className="text-xs text-gray-500 mt-1">
-                              {contracts.find(c=>c.id===s.contract_id)?.name?.substring(0,60)}...
+                              {(s.contract_ids||[]).length > 0
+                              ? (s.contract_ids||[]).map(cid => {
+                                  const c = contracts.find(x=>x.id===cid);
+                                  return c ? <span key={cid} className="inline-block bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-xs mr-1 mb-1">…{contractNum(c.name)}</span> : null;
+                                })
+                              : <span className="text-gray-400">Контракт не указан</span>
+                            }
                             </p>
                           </div>
                           <div className="text-right ml-4 flex-shrink-0">
                             {s.amount && <p className="text-lg font-bold text-blue-600">{fmtM(s.amount)} млн. руб.</p>}
                             <p className="text-xs text-gray-500 mt-1">{s.start_date ? fmtDate(s.start_date) : '—'} → {s.end_date ? fmtDate(s.end_date) : '—'}</p>
                             <div className="flex gap-2 mt-2 justify-end">
-                              <button onClick={()=>setEditingSubcontract({...s})} className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs"><IC.Edit2/> Изменить</button>
+                              <button onClick={()=>setEditingSubcontract({...s, contract_ids: (s.contract_ids||[]).map(Number)})} className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs"><IC.Edit2/> Изменить</button>
                               <button onClick={()=>handleDeleteSubcontract(s.id)} className="flex items-center gap-1 px-2 py-1 bg-red-50 text-red-500 rounded hover:bg-red-100 text-xs"><IC.Trash2/></button>
                             </div>
                           </div>

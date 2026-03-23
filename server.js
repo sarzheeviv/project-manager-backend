@@ -520,42 +520,74 @@ app.delete('/api/stages/:id', authenticateToken, async (req, res) => {
 
 // ============= SUBCONTRACTS ROUTES =============
 
+// GET — возвращает договоры с массивом contract_ids
 app.get('/api/subcontracts', authenticateToken, async (req, res) => {
   try {
     const { contract_id } = req.query;
-    let q = 'SELECT * FROM subcontracts';
+    let q = `
+      SELECT s.*, COALESCE(
+        array_agg(sc.contract_id) FILTER (WHERE sc.contract_id IS NOT NULL), '{}'
+      ) AS contract_ids
+      FROM subcontracts s
+      LEFT JOIN subcontract_contracts sc ON sc.subcontract_id = s.id
+    `;
     let params = [];
-    if (contract_id) { q += ' WHERE contract_id=$1'; params = [contract_id]; }
-    q += ' ORDER BY created_at DESC';
+    if (contract_id) {
+      q += ` WHERE s.id IN (SELECT subcontract_id FROM subcontract_contracts WHERE contract_id=$1)`;
+      params = [contract_id];
+    }
+    q += ` GROUP BY s.id ORDER BY s.created_at DESC`;
     const result = await pool.query(q, params);
     res.json(result.rows);
-  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Ошибка сервера' }); }
 });
 
+// POST — создать договор с привязкой к нескольким контрактам
 app.post('/api/subcontracts', authenticateToken, async (req, res) => {
   try {
-    const { contract_id, number, name, contractor, type, amount, start_date, end_date, status } = req.body;
+    const { contract_ids, number, name, contractor, type, amount, start_date, end_date, status } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
-    if (!contract_id) return res.status(400).json({ error: 'contract_id обязателен' });
+    if (!contract_ids || !contract_ids.length) return res.status(400).json({ error: 'Выберите хотя бы один контракт' });
     const result = await pool.query(
       'INSERT INTO subcontracts (contract_id, number, name, contractor, type, amount, start_date, end_date, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-      [contract_id, number||null, name.trim(), contractor||null, type||null, amount||null, start_date||null, end_date||null, status||'в работе']
+      [contract_ids[0], number||null, name.trim(), contractor||null, type||null, amount||null, start_date||null, end_date||null, status||'в работе']
     );
-    res.status(201).json({ subcontract: result.rows[0] });
-  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+    const subId = result.rows[0].id;
+    for (const cid of contract_ids) {
+      await pool.query('INSERT INTO subcontract_contracts (subcontract_id, contract_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [subId, cid]);
+    }
+    const full = await pool.query(
+      `SELECT s.*, COALESCE(array_agg(sc.contract_id) FILTER (WHERE sc.contract_id IS NOT NULL), '{}') AS contract_ids
+       FROM subcontracts s LEFT JOIN subcontract_contracts sc ON sc.subcontract_id=s.id WHERE s.id=$1 GROUP BY s.id`,
+      [subId]
+    );
+    res.status(201).json({ subcontract: full.rows[0] });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Ошибка сервера' }); }
 });
 
+// PUT — обновить + пересинхронизировать привязки к контрактам
 app.put('/api/subcontracts/:id', authenticateToken, async (req, res) => {
   try {
-    const { number, name, contractor, type, amount, start_date, end_date, status } = req.body;
+    const { contract_ids, number, name, contractor, type, amount, start_date, end_date, status } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
     const result = await pool.query(
       'UPDATE subcontracts SET number=$1, name=$2, contractor=$3, type=$4, amount=$5, start_date=$6, end_date=$7, status=$8 WHERE id=$9 RETURNING *',
       [number||null, name.trim(), contractor||null, type||null, amount||null, start_date||null, end_date||null, status||'в работе', req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Договор не найден' });
-    res.json({ subcontract: result.rows[0] });
-  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+    if (contract_ids && contract_ids.length) {
+      await pool.query('DELETE FROM subcontract_contracts WHERE subcontract_id=$1', [req.params.id]);
+      for (const cid of contract_ids) {
+        await pool.query('INSERT INTO subcontract_contracts (subcontract_id, contract_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.id, cid]);
+      }
+    }
+    const full = await pool.query(
+      `SELECT s.*, COALESCE(array_agg(sc.contract_id) FILTER (WHERE sc.contract_id IS NOT NULL), '{}') AS contract_ids
+       FROM subcontracts s LEFT JOIN subcontract_contracts sc ON sc.subcontract_id=s.id WHERE s.id=$1 GROUP BY s.id`,
+      [req.params.id]
+    );
+    res.json({ subcontract: full.rows[0] });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Ошибка сервера' }); }
 });
 
 app.delete('/api/subcontracts/:id', authenticateToken, async (req, res) => {
@@ -687,7 +719,7 @@ const initDB = async () => {
 
       CREATE TABLE IF NOT EXISTS subcontracts (
         id SERIAL PRIMARY KEY,
-        contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
+        contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL,
         number VARCHAR(200),
         name VARCHAR(500) NOT NULL,
         contractor VARCHAR(500),
@@ -698,6 +730,18 @@ const initDB = async () => {
         status VARCHAR(100) DEFAULT 'в работе',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS subcontract_contracts (
+        id SERIAL PRIMARY KEY,
+        subcontract_id INTEGER REFERENCES subcontracts(id) ON DELETE CASCADE,
+        contract_id INTEGER REFERENCES contracts(id) ON DELETE CASCADE,
+        UNIQUE(subcontract_id, contract_id)
+      );
+
+      -- Migrate existing links to junction table
+      INSERT INTO subcontract_contracts (subcontract_id, contract_id)
+        SELECT id, contract_id FROM subcontracts WHERE contract_id IS NOT NULL
+        ON CONFLICT DO NOTHING;
 
       CREATE TABLE IF NOT EXISTS objects (
         id SERIAL PRIMARY KEY,
