@@ -550,7 +550,7 @@ app.post('/api/subcontracts', authenticateToken, async (req, res) => {
     if (!contract_ids || !contract_ids.length) return res.status(400).json({ error: 'Выберите хотя бы один контракт' });
     const result = await pool.query(
       'INSERT INTO subcontracts (contract_id, number, name, contractor, type, amount, vat_rate, start_date, end_date, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-      [contract_ids[0], number||null, name.trim(), contractor||null, type||null, amount||null, vat_rate||20, start_date||null, end_date||null, status||'в работе']
+      [contract_ids[0], number||null, name.trim(), contractor||null, type||null, amount||null, vat_rate != null ? vat_rate : 20, start_date||null, end_date||null, status||'в работе']
     );
     const subId = result.rows[0].id;
     for (const cid of contract_ids) {
@@ -572,7 +572,7 @@ app.put('/api/subcontracts/:id', authenticateToken, async (req, res) => {
     if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
     const result = await pool.query(
       'UPDATE subcontracts SET number=$1, name=$2, contractor=$3, type=$4, amount=$5, vat_rate=$6, start_date=$7, end_date=$8, status=$9 WHERE id=$10 RETURNING *',
-      [number||null, name.trim(), contractor||null, type||null, amount||null, vat_rate||20, start_date||null, end_date||null, status||'в работе', req.params.id]
+      [number||null, name.trim(), contractor||null, type||null, amount||null, vat_rate != null ? vat_rate : 20, start_date||null, end_date||null, status||'в работе', req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Договор не найден' });
     if (contract_ids && contract_ids.length) {
