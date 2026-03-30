@@ -486,8 +486,8 @@ function App() {
   const totalEquip = contracts.reduce((s,c)=>s+parseFloat(c.equipment_price||0),0);
   const totalPir = contracts.reduce((s,c)=>s+parseFloat(c.pir_price||0),0);
   // НДС формулы
-  const calcVat = (sum) => sum * vatRate / (vatRate + 100);
-  const calcNoVat = (sum) => sum * 100 / (vatRate + 100);
+  const calcVat = (sum) => vatRate === 0 ? 0 : sum * vatRate / (vatRate + 100);
+  const calcNoVat = (sum) => vatRate === 0 ? sum : sum * 100 / (vatRate + 100);
   const fmtVatBlock = (sum) => `Без НДС: ${fmt(calcNoVat(sum))} руб. / в т.ч. НДС ${vatRate}%: ${fmt(calcVat(sum))} руб.`;
 
   // Номер контракта из названия
@@ -1350,7 +1350,7 @@ function App() {
             {(() => {
               const totalAmt = subcontracts.reduce((s,x)=>s+parseFloat(x.amount||0),0);
               const totalNoVat = subcontracts.reduce((s,x)=>{
-                const a=parseFloat(x.amount||0); const vr=parseFloat(x.vat_rate||20);
+                const a=parseFloat(x.amount||0); const vr=parseFloat(x.vat_rate != null ? x.vat_rate : 20);
                 return s + a*100/(vr+100);
               },0);
               const totalVat = totalAmt - totalNoVat;
@@ -1563,7 +1563,7 @@ function App() {
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-gray-600 mb-1">Ставка НДС (%)</label>
-                            <input type="number" min="0" max="100" value={editingSubcontract.vat_rate||20} onChange={e=>setEditingSubcontract({...editingSubcontract,vat_rate:parseFloat(e.target.value)||0})}
+                            <input type="number" min="0" max="100" value={editingSubcontract.vat_rate != null ? editingSubcontract.vat_rate : 20} onChange={e=>setEditingSubcontract({...editingSubcontract,vat_rate:parseFloat(e.target.value)||0})}
                               className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
                           </div>
                           <div>
@@ -1613,7 +1613,7 @@ function App() {
                           <div className="text-right ml-4 flex-shrink-0">
                             {s.amount && (() => {
                               const amt = parseFloat(s.amount);
-                              const vr = parseFloat(s.vat_rate||20);
+                              const vr = parseFloat(s.vat_rate != null ? s.vat_rate : 20);
                               const noVat = amt * 100 / (vr + 100);
                               const vatAmt = amt * vr / (vr + 100);
                               return (
@@ -1644,6 +1644,14 @@ function App() {
         )}
       {/* MODAL */}
       {showAddModal && <AddModal type={modalType} contracts={contracts} onClose={()=>setShowAddModal(false)}/>}
+
+      {/* FOOTER */}
+      <footer className="mt-12 border-t border-gray-200 bg-white">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between text-xs text-gray-400">
+          <span>Система управления контрактами • ГУП Московский метрополитен</span>
+          <span>Разработчик: <span className="text-gray-600 font-medium">Саржеев Илья</span> · <a href="tel:+79857389327" className="text-blue-500 hover:text-blue-700">+7-985-738-93-27</a></span>
+        </div>
+      </footer>
     </div>
   );
 }
