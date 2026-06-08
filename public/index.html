@@ -171,6 +171,12 @@ function App() {
   const [vatInput, setVatInput] = React.useState('20');
   const [showNewContractForm, setShowNewContractForm] = React.useState(false);
   const [newContract, setNewContract] = React.useState({name:'', status:'Проектирование', progress:0, customer:'ГУП Московский метрополитен', contractor:'', contract_date:'', area:''});
+  const [ragDocs, setRagDocs] = React.useState([]);
+  const [ragMessages, setRagMessages] = React.useState([]);
+  const [ragQuestion, setRagQuestion] = React.useState('');
+  const [ragLoading, setRagLoading] = React.useState(false);
+  const [ragUploading, setRagUploading] = React.useState(false);
+  const [ragContractFilter, setRagContractFilter] = React.useState('all');
   const [loading, setLoading] = React.useState(false);
   const [editingId, setEditingId] = React.useState(null);
   const [editData, setEditData] = React.useState({});
@@ -215,6 +221,8 @@ function App() {
       if (pr && pr.ok) setPayments(await pr.json());
       const sr = await fetch(`${API_URL}/subcontracts`, {headers:h});
       if (sr.ok) setSubcontracts(await sr.json());
+      const dr = await fetch(`${API_URL}/documents`, {headers:h});
+      if (dr.ok) setRagDocs(await dr.json());
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -452,6 +460,66 @@ function App() {
     } catch(e) {}
   };
 
+
+  // ---- RAG HANDLERS ----
+  const handleUploadDoc = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setRagUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (ragContractFilter !== 'all') formData.append('contract_id', ragContractFilter);
+      const res = await fetch(`${API_URL}/documents/upload`, {
+        method: 'POST',
+        headers: {'Authorization': `Bearer ${token}`},
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRagDocs(prev => [data.document, ...prev]);
+        alert('✅ Документ загружен: ' + data.document.name);
+      } else { alert('Ошибка: ' + data.error); }
+    } catch(e) { alert('Ошибка загрузки: ' + e.message); }
+    finally { setRagUploading(false); e.target.value = ''; }
+  };
+
+  const handleDeleteDoc = async (id) => {
+    if (!confirm('Удалить документ?')) return;
+    try {
+      const res = await fetch(`${API_URL}/documents/${id}`, {
+        method: 'DELETE', headers: {'Authorization': `Bearer ${token}`}
+      });
+      if (res.ok) setRagDocs(prev => prev.filter(d => d.id !== id));
+    } catch(e) {}
+  };
+
+  const handleAskRag = async () => {
+    if (!ragQuestion.trim()) return;
+    const question = ragQuestion;
+    setRagQuestion('');
+    setRagMessages(prev => [...prev, {role:'user', text: question}]);
+    setRagLoading(true);
+    try {
+      const body = { question };
+      if (ragContractFilter !== 'all') body.contract_id = ragContractFilter;
+      const res = await fetch(`${API_URL}/documents/ask`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Authorization': `Bearer ${token}`},
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRagMessages(prev => [...prev, {role:'assistant', text: data.answer, docs: data.docs_used}]);
+      } else {
+        setRagMessages(prev => [...prev, {role:'error', text: data.error}]);
+      }
+    } catch(e) {
+      setRagMessages(prev => [...prev, {role:'error', text: 'Ошибка соединения'}]);
+    }
+    finally { setRagLoading(false); }
+  };
+
   React.useEffect(() => { if (token) loadData(); }, []);
 
   if (!token) return <LoginScreen onLogin={handleLogin} loading={loading}/>;
@@ -527,6 +595,7 @@ function App() {
             {id:'timeline', label:'📅 Графики и сроки'},
             {id:'finances', label:'💰 Финансы'},
             {id:'subcontracts', label:'📝 Договоры подряда'},
+            {id:'rag', label:'🤖 ИИ-помощник'},
           ].map(tab=>(
             <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
               className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${activeTab===tab.id?'border-blue-600 text-blue-600':'border-transparent text-gray-500 hover:text-gray-900'}`}>
@@ -1640,6 +1709,111 @@ function App() {
                 </div>
               );
             })()}
+          </div>
+        )}
+
+        {/* ========== RAG ========== */}
+        {activeTab==='rag' && !loading && (
+          <div className="space-y-6">
+            <div className="flex items-start gap-6">
+
+              {/* LEFT — Document list */}
+              <div className="w-80 flex-shrink-0 space-y-4">
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <h3 className="font-semibold text-gray-900 mb-3">📁 База документов</h3>
+                  <div className="mb-3">
+                    <select value={ragContractFilter} onChange={e=>setRagContractFilter(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="all">Все контракты</option>
+                      {contracts.map(c=><option key={c.id} value={c.id}>…{contractNum(c.name)}</option>)}
+                    </select>
+                  </div>
+                  <label className={`flex items-center justify-center gap-2 w-full py-2.5 rounded-lg border-2 border-dashed cursor-pointer text-sm font-medium transition ${ragUploading?'border-blue-300 bg-blue-50 text-blue-500':'border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-600'}`}>
+                    <input type="file" accept=".pdf,.doc,.docx" onChange={handleUploadDoc} className="hidden" disabled={ragUploading}/>
+                    {ragUploading ? '⏳ Загружаю...' : '➕ Загрузить PDF или Word'}
+                  </label>
+                  <div className="mt-3 space-y-2 max-h-96 overflow-y-auto">
+                    {ragDocs.filter(d => ragContractFilter==='all' || String(d.contract_id)===String(ragContractFilter)).map(doc=>(
+                      <div key={doc.id} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg group">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-gray-800 truncate">{doc.name}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {doc.type?.includes('pdf') ? '📄 PDF' : '📝 Word'} · {doc.size ? (doc.size/1024).toFixed(0)+'KB' : ''}
+                          </p>
+                        </div>
+                        <button onClick={()=>handleDeleteDoc(doc.id)} className="ml-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 flex-shrink-0">
+                          <IC.Trash2/>
+                        </button>
+                      </div>
+                    ))}
+                    {ragDocs.length===0 && <p className="text-xs text-gray-400 text-center py-4">Документов пока нет</p>}
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT — Chat */}
+              <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-xl overflow-hidden" style={{minHeight:'600px'}}>
+                <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-blue-600 to-blue-700">
+                  <h3 className="font-semibold text-white">🤖 ИИ-помощник по документам</h3>
+                  <p className="text-xs text-blue-200 mt-0.5">Задайте вопрос — Claude найдёт ответ в загруженных документах</p>
+                </div>
+
+                {/* Messages */}
+                <div className="flex-1 overflow-y-auto p-5 space-y-4" style={{maxHeight:'460px'}}>
+                  {ragMessages.length===0 && (
+                    <div className="text-center py-12">
+                      <p className="text-4xl mb-3">🔍</p>
+                      <p className="text-gray-500 text-sm">Загрузите документы слева и задайте вопрос</p>
+                      <div className="mt-4 space-y-2 text-left max-w-sm mx-auto">
+                        {['Какой срок сдачи проектной документации?','Каковы условия оплаты по контракту?','Какие штрафные санкции предусмотрены?','Кто является ответственным лицом?'].map(q=>(
+                          <button key={q} onClick={()=>setRagQuestion(q)}
+                            className="w-full text-left px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-xs hover:bg-blue-100 transition">
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {ragMessages.map((msg, i)=>(
+                    <div key={i} className={`flex ${msg.role==='user'?'justify-end':''}`}>
+                      {msg.role==='user' && (
+                        <div className="max-w-lg bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-3 text-sm">{msg.text}</div>
+                      )}
+                      {msg.role==='assistant' && (
+                        <div className="max-w-2xl">
+                          <div className="bg-gray-50 border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{msg.text}</div>
+                          {msg.docs && <p className="text-xs text-gray-400 mt-1 ml-2">Источники: {msg.docs.join(', ')}</p>}
+                        </div>
+                      )}
+                      {msg.role==='error' && (
+                        <div className="max-w-lg bg-red-50 border border-red-200 text-red-700 rounded-2xl px-4 py-3 text-sm">❌ {msg.text}</div>
+                      )}
+                    </div>
+                  ))}
+                  {ragLoading && (
+                    <div className="flex items-center gap-2 text-gray-400 text-sm">
+                      <span className="animate-pulse">🤖 Claude анализирует документы...</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Input */}
+                <div className="p-4 border-t border-gray-100 bg-gray-50">
+                  <div className="flex gap-3">
+                    <input type="text" value={ragQuestion} onChange={e=>setRagQuestion(e.target.value)}
+                      onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&handleAskRag()}
+                      placeholder="Задайте вопрос по загруженным документам..."
+                      disabled={ragLoading || ragDocs.length===0}
+                      className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"/>
+                    <button onClick={handleAskRag} disabled={ragLoading || !ragQuestion.trim() || ragDocs.length===0}
+                      className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-40 text-sm font-medium flex items-center gap-2">
+                      {ragLoading ? '...' : '➤ Спросить'}
+                    </button>
+                  </div>
+                  {ragDocs.length===0 && <p className="text-xs text-amber-600 mt-2">⚠️ Сначала загрузите хотя бы один документ</p>}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       {/* MODAL */}
