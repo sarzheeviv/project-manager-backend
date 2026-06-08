@@ -846,13 +846,14 @@ const initDB = async () => {
         id SERIAL PRIMARY KEY,
         contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL,
         name VARCHAR(500) NOT NULL,
-        type VARCHAR(50),
+        type VARCHAR(200),
         size INTEGER,
         content TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         created_by INTEGER REFERENCES users(id)
       );
       CREATE INDEX IF NOT EXISTS idx_documents_contract ON documents(contract_id);
+      ALTER TABLE documents ALTER COLUMN type TYPE VARCHAR(200);
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS expiry_date DATE;
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS pir_price NUMERIC(15,2);
 
