@@ -14,7 +14,11 @@
     "jsonwebtoken": "^9.0.0",
     "dotenv": "^16.3.1",
     "cors": "^2.8.5",
-    "body-parser": "^1.20.2"
+    "body-parser": "^1.20.2",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.7.2",
+    "@anthropic-ai/sdk": "^0.24.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

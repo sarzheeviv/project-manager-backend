@@ -4,13 +4,21 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
+const Anthropic = require('@anthropic-ai/sdk');
 require('dotenv').config();
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const app = express();
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 
 // Database connection
 const pool = new Pool({
@@ -476,6 +484,129 @@ app.put('/api/payments/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Платёж обновлён', payment: result.rows[0] });
   } catch (error) { res.status(500).json({ error: 'Ошибка сервера' }); }
 });
+
+// ============= DOCUMENTS & RAG ROUTES =============
+
+// Загрузить документ (PDF или Word)
+app.post('/api/documents/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
+
+    const { contract_id } = req.body;
+    const { originalname, mimetype, buffer, size } = req.file;
+    let text = '';
+
+    // Извлечение текста
+    if (mimetype === 'application/pdf') {
+      const parsed = await pdfParse(buffer);
+      text = parsed.text;
+    } else if (
+      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimetype === 'application/msword'
+    ) {
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value;
+    } else {
+      return res.status(400).json({ error: 'Поддерживаются только PDF и Word файлы' });
+    }
+
+    if (!text || text.trim().length < 10) {
+      return res.status(400).json({ error: 'Не удалось извлечь текст из документа' });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO documents (contract_id, name, type, size, content, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, name, type, size, contract_id, created_at',
+      [contract_id || null, originalname, mimetype, size, text, req.user.id]
+    );
+    res.status(201).json({ message: 'Документ загружен', document: result.rows[0] });
+  } catch (error) {
+    console.error('Ошибка загрузки документа:', error);
+    res.status(500).json({ error: 'Ошибка обработки файла: ' + error.message });
+  }
+});
+
+// Получить список документов
+app.get('/api/documents', authenticateToken, async (req, res) => {
+  try {
+    const { contract_id } = req.query;
+    let q = 'SELECT id, name, type, size, contract_id, created_at FROM documents';
+    let params = [];
+    if (contract_id) { q += ' WHERE contract_id=$1'; params = [contract_id]; }
+    q += ' ORDER BY created_at DESC';
+    const result = await pool.query(q, params);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+// Удалить документ
+app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM documents WHERE id=$1', [req.params.id]);
+    res.json({ id: req.params.id });
+  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
+});
+
+// RAG — задать вопрос по документам
+app.post('/api/documents/ask', authenticateToken, async (req, res) => {
+  try {
+    const { question, contract_id, doc_ids } = req.body;
+    if (!question || !question.trim()) return res.status(400).json({ error: 'Вопрос не может быть пустым' });
+
+    // Получаем документы
+    let q = 'SELECT name, content FROM documents';
+    let params = [];
+    if (doc_ids && doc_ids.length) {
+      q += ' WHERE id = ANY($1)';
+      params = [doc_ids];
+    } else if (contract_id) {
+      q += ' WHERE contract_id=$1';
+      params = [contract_id];
+    }
+    q += ' LIMIT 10';
+    const docs = await pool.query(q, params);
+
+    if (!docs.rows.length) return res.status(404).json({ error: 'Документы не найдены' });
+
+    // Формируем контекст (обрезаем до 80к символов)
+    let context = '';
+    for (const doc of docs.rows) {
+      const chunk = doc.content.substring(0, 8000);
+      context += `
+
+=== Документ: ${doc.name} ===
+${chunk}`;
+      if (context.length > 80000) break;
+    }
+
+    // Запрос к Claude
+    const response = await anthropic.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 2048,
+      system: `Ты помощник для работы с документами строительной компании ГУП Московский метрополитен. 
+Отвечай на русском языке. Основывайся только на предоставленных документах. 
+Если информации нет в документах — честно скажи об этом. 
+Цитируй конкретные пункты и страницы когда это уместно.`,
+      messages: [
+        {
+          role: 'user',
+          content: `Вот документы для анализа:
+${context}
+
+Вопрос: ${question}`
+        }
+      ]
+    });
+
+    res.json({
+      answer: response.content[0].text,
+      docs_used: docs.rows.map(d => d.name)
+    });
+  } catch (error) {
+    console.error('Ошибка RAG:', error);
+    res.status(500).json({ error: 'Ошибка ИИ: ' + error.message });
+  }
+});
+
 // ============= STAGES ROUTES =============
 
 app.get('/api/contracts/:contract_id/stages', authenticateToken, async (req, res) => {
@@ -710,6 +841,18 @@ const initDB = async () => {
       );
 
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS end_date DATE;
+
+      CREATE TABLE IF NOT EXISTS documents (
+        id SERIAL PRIMARY KEY,
+        contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL,
+        name VARCHAR(500) NOT NULL,
+        type VARCHAR(50),
+        size INTEGER,
+        content TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by INTEGER REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_documents_contract ON documents(contract_id);
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS expiry_date DATE;
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS pir_price NUMERIC(15,2);
 
