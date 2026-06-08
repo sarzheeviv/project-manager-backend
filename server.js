@@ -493,7 +493,9 @@ app.post('/api/documents/upload', authenticateToken, upload.single('file'), asyn
     if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
 
     const { contract_id } = req.body;
-    const { originalname, mimetype, buffer, size } = req.file;
+    const { mimetype, buffer, size } = req.file;
+    // Fix Russian filename encoding
+    const originalname = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
     let text = '';
 
     // Извлечение текста
@@ -853,6 +855,7 @@ const initDB = async () => {
         created_by INTEGER REFERENCES users(id)
       );
       CREATE INDEX IF NOT EXISTS idx_documents_contract ON documents(contract_id);
+      ALTER TABLE documents ALTER COLUMN type TYPE VARCHAR(200);
       ALTER TABLE documents ALTER COLUMN type TYPE VARCHAR(200);
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS expiry_date DATE;
       ALTER TABLE contracts ADD COLUMN IF NOT EXISTS pir_price NUMERIC(15,2);
